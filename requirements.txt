@@ -1,0 +1,4 @@
+vllm==0.15.1
+accelerate>=1.1.0
+requests
+pydantic

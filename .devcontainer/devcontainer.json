@@ -1,0 +1,16 @@
+{
+  "name": "Med LLM Bench Dev",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
+  "workspaceFolder": "/app",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  },
+  "runArgs": [
+    "--gpus", "all"  
+  ]
+}

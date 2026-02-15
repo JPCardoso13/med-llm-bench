@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# VSCode
+.vscode
+
+# Other
+.env
+data/
