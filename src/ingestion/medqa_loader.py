@@ -1,9 +1,12 @@
+import logging
 import uuid
 from typing import List, Optional
 from src.ingestion.base_loader import BaseLoader, BenchmarkSample
 from src.schemas.mcqsample import MCQSample
 from src.schemas.generativesample import GenerativeSample
 from pydantic import ValidationError
+
+logger = logging.getLogger(__name__)
 
 class MedQALoader(BaseLoader):
     """
@@ -32,11 +35,14 @@ class MedQALoader(BaseLoader):
         else:
             from datasets import load_dataset
             raw_data = load_dataset(self.path_or_name, split=self.split)
+
         samples = []
         
         print(f"Processing {len(raw_data)} entries...")
 
-        for entry in raw_data:
+        invalid_count = 0
+        for idx, entry in enumerate(raw_data): # NOTE: idx is the literal index of the 'raw_data' list,
+                                               # which may differ from the original dataset's 'id' field if it exists.
             # ID is absent in the raw dataset, so we generate a unique one for each sample.
             unique_id = f"medqa_{str(uuid.uuid4())[:8]}"
             
@@ -50,7 +56,9 @@ class MedQALoader(BaseLoader):
                         source="medqa",
                         category=entry.get('meta_info')
                     ))
-                except ValidationError:
+                except ValidationError as e:
+                    invalid_count += 1
+                    logger.warning("Invalid entry at index %s: %s", idx, e)
                     continue
 
             elif self.task_type == "generation":
@@ -62,11 +70,14 @@ class MedQALoader(BaseLoader):
                         source="medqa",
                         category=entry.get('meta_info')
                     ))
-                except ValidationError:
+                except ValidationError as e:
+                    invalid_count += 1
+                    logger.warning("Invalid entry at index %s: %s", idx, e)
                     continue
 
+        if invalid_count:
+            logger.warning("Skipped %s invalid entries during MedQA load.", invalid_count)
         print(f"Loaded {len(samples)}/{len(raw_data)} MedQA samples.")
-
         return samples
 
 if __name__ == "__main__":
@@ -74,4 +85,5 @@ if __name__ == "__main__":
     data = loader.load()
     if data:
         print(f"\nFirst Sample: {data[0]}")
+        print(f"\nCategory: {data[0].category}")
         print(f"\nData Type: {type(data[0])}")
