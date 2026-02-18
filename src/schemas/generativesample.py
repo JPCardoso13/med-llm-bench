@@ -1,5 +1,6 @@
-from typing import Optional
+from typing import Optional, Dict
 from pydantic import BaseModel, field_validator, ValidationInfo, ValidationError
+from dataclasses import field
 
 class GenerativeSample(BaseModel):
     """
@@ -16,6 +17,8 @@ class GenerativeSample(BaseModel):
                                 Defaults to None.
         category (Optional[str]): The specific domain, topic, or sub-field. 
                                   Example: "Cardiology", "Physics". Defaults to None.
+        tags (Dict[str, str]): A dictionary of arbitrary key-value pairs for additional metadata.
+                               Defaults to an empty dictionary.
         context (Optional[str]): Reference text if the task is context-dependent
                                  (e.g., a reading comprehension task). Defaults to None.
     
@@ -27,6 +30,7 @@ class GenerativeSample(BaseModel):
     ref_answer: str
     source: Optional[str] = None
     category: Optional[str] = None
+    tags: Dict[str, str] = field(default_factory=dict)
     context: Optional[str] = None
 
     # Constraint 1: Mandatory fields must not be empty or whitespace
@@ -94,3 +98,30 @@ if __name__ == "__main__":
         # ref_answer is missing
     }
     run_test("Missing Field", missing_field_data, should_pass=False)
+
+    # 5. PASS: Valid Tags
+    valid_tags_data = {
+        "id": "gen_005",
+        "question": "Explain quantum entanglement.",
+        "ref_answer": "Quantum entanglement is a phenomenon where...",
+        "tags": {"specialty": "physics", "difficulty": "medium"}
+    }
+    run_test("Valid Tags", valid_tags_data, should_pass=True)
+
+    # 6. FAIL: Tags is List (not Dict)
+    tags_list_data = {
+        "id": "gen_006",
+        "question": "Valid Question",
+        "ref_answer": "Valid answer",
+        "tags": ["tag1", "tag2"]  # List instead of Dict
+    }
+    run_test("Tags Type Check (List)", tags_list_data, should_pass=False)
+
+    # 7. FAIL: Tags Dict with Non-String Values
+    tags_bad_value_data = {
+        "id": "gen_007",
+        "question": "Valid Question",
+        "ref_answer": "Valid answer",
+        "tags": {"difficulty": 5}  # Int value instead of String
+    }
+    run_test("Tags Value Type Check", tags_bad_value_data, should_pass=False)

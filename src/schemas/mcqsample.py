@@ -1,5 +1,6 @@
 from typing import Dict, Optional
 from pydantic import BaseModel, field_validator, model_validator, ValidationInfo, ValidationError
+from dataclasses import field
 
 class MCQSample(BaseModel):
     """
@@ -19,6 +20,8 @@ class MCQSample(BaseModel):
                                 Defaults to None.
         category (Optional[str]): The specific domain, topic, or sub-field. 
                                   Example: "Cardiology", "Physics". Defaults to None.
+        tags (Dict[str, str]): A dictionary of arbitrary key-value pairs for additional metadata.
+                               Defaults to an empty dictionary.
         context (Optional[str]): Reference text if the task is context-dependent
                                  (e.g., a reading comprehension task). Defaults to None.
     
@@ -31,6 +34,7 @@ class MCQSample(BaseModel):
     answer_idx: str 
     source: Optional[str] = None
     category: Optional[str] = None
+    tags: Dict[str, str] = field(default_factory=dict)
     context: Optional[str] = None
 
     # Constraint 1: Mandatory string fields must not be empty or whitespace
@@ -133,3 +137,33 @@ if __name__ == "__main__":
         # options and answer_idx are missing
     }
     run_test("Missing Fields", missing_field_data, should_pass=False)
+
+    # 7. PASS: Valid Tags
+    valid_tags_data = {
+        "id": "test_007",
+        "question": "What is the capital of France?",
+        "options": {"A": "Berlin", "B": "Paris", "C": "Madrid"},
+        "answer_idx": "B",
+        "tags": {"specialty": "cardiology", "difficulty": "hard"}
+    }
+    run_test("Valid Tags", valid_tags_data, should_pass=True)
+
+    # 8. FAIL: Tags is List (not Dict)
+    tags_list_data = {
+        "id": "test_008",
+        "question": "Valid Question",
+        "options": {"A": "1", "B": "2"},
+        "answer_idx": "A",
+        "tags": ["tag1", "tag2"]  # List instead of Dict
+    }
+    run_test("Tags Type Check (List)", tags_list_data, should_pass=False)
+
+    # 9. FAIL: Tags Dict with Non-String Values
+    tags_bad_value_data = {
+        "id": "test_009",
+        "question": "Valid Question",
+        "options": {"A": "1", "B": "2"},
+        "answer_idx": "A",
+        "tags": {"difficulty": 5}  # Int value instead of String
+    }
+    run_test("Tags Value Type Check", tags_bad_value_data, should_pass=False)
