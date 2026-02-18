@@ -3,8 +3,8 @@ import uuid
 from typing import List, Optional
 from src.ingestion.base_loader import BaseLoader, BenchmarkSample
 from src.schemas.mcqsample import MCQSample
-# from src.schemas.generativesample import GenerativeSample
 from pydantic import ValidationError
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,15 @@ class MedXpertLoader(BaseLoader):
                  task_type: str = "mcq", 
                  split: Optional[str] = "test"):
         super().__init__(path_or_name, task_type, split)
+
+    def _clean_question(self, text: str) -> str:
+        """
+        Removes explicit answer choices from the question text 
+        so we don't duplicate options in the final prompt.
+        """
+        pattern = r"(?i)(Answer Choices:|Options:|Select one:).*$"
+        cleaned = re.sub(pattern, "", text, flags=re.DOTALL).strip()
+        return cleaned
 
     def load(self) -> List[BenchmarkSample]:
         print(f"Loading MedXpertQA from {self.path_or_name} (Task: {self.task_type})...")
@@ -51,23 +60,28 @@ class MedXpertLoader(BaseLoader):
             options = entry.get('options')
             answer_key = entry.get('label')
             category = entry.get('body_system') # e.g. "Cardiovascular" (Could be converted to a medical specialty)
+            tags = {
+                "medical_task": entry.get("medical_task"),
+                "question_type": entry.get("question_type")
+            }
 
             if self.task_type == "mcq":
                 try:
                     samples.append(MCQSample(
                         id=unique_id,
-                        question=question_text,
+                        question=self._clean_question(question_text),
                         options=options,
                         answer_idx=answer_key,
                         source="medxpertqa_text",
-                        category=category
+                        category=category,
+                        tags = tags
                     ))
                 except ValidationError as e:
                     invalid_count += 1
                     logger.warning("Invalid entry at index %s: %s", idx, e)
                     continue
 
-            # No generation task defined for this dataset, for now
+            # No generation task defined for this dataset yet
         
         if invalid_count:
             logger.warning("Skipped %s invalid entries during MedXpertQA load.", invalid_count)
