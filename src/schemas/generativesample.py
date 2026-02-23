@@ -12,7 +12,9 @@ class GenerativeSample(BaseModel):
     Attributes:
         id (str): A unique identifier for the sample.
         question (str): The question the model should answer..
-        ref_answer (str): The reference answer (ground truth) used for evaluation.
+        answer (str): The reference answer (ground truth) used for evaluation.
+        ref_reasoning (Optional[str]): Optional reference reasoning/explanation
+                                       for the answer. Defaults to None.
         source (Optional[str]): The origin dataset name (e.g., "medqa", "mmlu", "custom_test").
                                 Defaults to None.
         category (Optional[str]): The specific domain, topic, or sub-field. 
@@ -27,14 +29,15 @@ class GenerativeSample(BaseModel):
     """
     id: str
     question: str
-    ref_answer: str
+    answer: str
+    ref_reasoning: Optional[str] = None
     source: Optional[str] = None
     category: Optional[str] = None
     tags: Dict[str, str] = field(default_factory=dict)
     context: Optional[str] = None
 
     # Constraint 1: Mandatory fields must not be empty or whitespace
-    @field_validator('id', 'question', 'ref_answer')
+    @field_validator('id', 'question', 'answer')
     @classmethod
     def check_non_empty_string(cls, v: str, info: ValidationInfo) -> str:
         if not v.strip():
@@ -69,7 +72,8 @@ if __name__ == "__main__":
     valid_data = {
         "id": "gen_001",
         "question": "Explain quantum entanglement.",
-        "ref_answer": "Quantum entanglement is a phenomenon where...",
+        "answer": "Quantum entanglement is a phenomenon where...",
+        "ref_reasoning": "Entanglement describes correlated quantum states that remain linked.",
         "source": "PhysicsDB",
         "category": "Science"
     }
@@ -79,7 +83,7 @@ if __name__ == "__main__":
     empty_q_data = {
         "id": "gen_002",
         "question": "", 
-        "ref_answer": "Valid answer"
+        "answer": "Valid answer"
     }
     run_test("Empty Question", empty_q_data, should_pass=False)
 
@@ -87,7 +91,7 @@ if __name__ == "__main__":
     whitespace_data = {
         "id": "gen_003",
         "question": "Valid Question",
-        "ref_answer": "   "  # Just whitespace
+        "answer": "   "  # Just whitespace
     }
     run_test("Whitespace Ref Answer", whitespace_data, should_pass=False)
 
@@ -95,7 +99,7 @@ if __name__ == "__main__":
     missing_field_data = {
         "id": "gen_004",
         "question": "Valid Question"
-        # ref_answer is missing
+        # answer is missing
     }
     run_test("Missing Field", missing_field_data, should_pass=False)
 
@@ -103,7 +107,7 @@ if __name__ == "__main__":
     valid_tags_data = {
         "id": "gen_005",
         "question": "Explain quantum entanglement.",
-        "ref_answer": "Quantum entanglement is a phenomenon where...",
+        "answer": "Quantum entanglement is a phenomenon where...",
         "tags": {"specialty": "physics", "difficulty": "medium"}
     }
     run_test("Valid Tags", valid_tags_data, should_pass=True)
@@ -112,7 +116,7 @@ if __name__ == "__main__":
     tags_list_data = {
         "id": "gen_006",
         "question": "Valid Question",
-        "ref_answer": "Valid answer",
+        "answer": "Valid answer",
         "tags": ["tag1", "tag2"]  # List instead of Dict
     }
     run_test("Tags Type Check (List)", tags_list_data, should_pass=False)
@@ -121,7 +125,7 @@ if __name__ == "__main__":
     tags_bad_value_data = {
         "id": "gen_007",
         "question": "Valid Question",
-        "ref_answer": "Valid answer",
+        "answer": "Valid answer",
         "tags": {"difficulty": 5}  # Int value instead of String
     }
     run_test("Tags Value Type Check", tags_bad_value_data, should_pass=False)
