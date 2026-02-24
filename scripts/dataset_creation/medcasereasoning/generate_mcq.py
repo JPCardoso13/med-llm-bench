@@ -3,15 +3,14 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
 from datasets import Dataset, DatasetDict, load_dataset
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
-MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
+MODEL_NAME = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset.jsonl"
 MAX_RETRIES = 3
-TEMPERATURE_SCHEDULE = [0.7, 0.4, 0.2]
+TEMPERATURE_SCHEDULE = [0.7, 0.5, 0.3]
 
 SYSTEM_PROMPT = """You are an expert clinical reasoning assistant.
 
@@ -19,9 +18,9 @@ Task:
 Given a patient case prompt, diagnostic reasoning, and the final diagnosis, produce exactly 3 incorrect but clinically plausible differential diagnoses (distractors).
 
 Rules:
-1. Prefer extracting distractors that are explicitly mentioned as alternatives in diagnostic_reasoning.
-2. If fewer than 3 are available, generate plausible distractors from the case_prompt.
-3. Distractors must NOT be the same as, or aliases/synonyms of, the final_diagnosis.
+1. Prefer extracting distractors that are explicitly mentioned in diagnostic_reasoning.
+2. If fewer than 3 are available, generate plausible distractors from case_prompt.
+3. Distractors must NOT be the same as, or aliases/synonyms of final_diagnosis.
 4. Return ONLY valid JSON in this exact format:
 {"distractors": ["d1", "d2", "d3"]}
 """
@@ -117,8 +116,8 @@ def resolve_records(limit: Optional[int]) -> Dataset:
     dataset_obj = load_dataset("zou-lab/MedCaseReasoning")
 
     if isinstance(dataset_obj, DatasetDict):
-        if "train" in dataset_obj:
-            records = dataset_obj["train"]
+        if "test" in dataset_obj:
+            records = dataset_obj["test"]
         else:
             first_split = next(iter(dataset_obj.keys()))
             records = dataset_obj[first_split]
