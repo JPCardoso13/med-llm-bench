@@ -7,7 +7,7 @@ from datasets import Dataset, DatasetDict, load_dataset
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
-MODEL_NAME = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
 DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset.jsonl"
 MAX_RETRIES = 3
 TEMPERATURE_SCHEDULE = [0.7, 0.5, 0.3]
