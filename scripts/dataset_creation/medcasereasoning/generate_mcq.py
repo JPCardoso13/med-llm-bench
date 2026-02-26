@@ -7,10 +7,18 @@ from datasets import Dataset, DatasetDict, load_dataset
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
+<<<<<<< HEAD
 MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
 DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset.jsonl"
+=======
+DATASET = "zou-lab/MedCaseReasoning"
+SPLIT = "test"
+MODEL_NAME = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset.json"
+>>>>>>> 7e47858 (Small modifications)
 MAX_RETRIES = 3
 TEMPERATURE_SCHEDULE = [0.7, 0.5, 0.3]
+NUM_GPUS = 1
 
 SYSTEM_PROMPT = """You are an expert clinical reasoning assistant.
 
@@ -112,25 +120,6 @@ def build_user_prompt(
     )
 
 
-def resolve_records(limit: Optional[int]) -> Dataset:
-    dataset_obj = load_dataset("zou-lab/MedCaseReasoning")
-
-    if isinstance(dataset_obj, DatasetDict):
-        if "test" in dataset_obj:
-            records = dataset_obj["test"]
-        else:
-            first_split = next(iter(dataset_obj.keys()))
-            records = dataset_obj[first_split]
-    else:
-        records = dataset_obj
-
-    if limit is not None:
-        take_n = min(limit, len(records))
-        records = records.select(range(take_n))
-
-    return records
-
-
 def generate_distractors_for_case(
     llm: LLM,
     case_prompt: str,
@@ -181,12 +170,13 @@ def main(limit: Optional[int], output_path: str) -> None:
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    records = resolve_records(limit)
+    records = load_dataset(DATASET, split=SPLIT)
+    records = records.select(range(min(limit, len(records)))) if limit else records
 
     llm = LLM(
         model=MODEL_NAME,
         gpu_memory_utilization=0.9,
-        trust_remote_code=True,
+        tensor_parallel_size=NUM_GPUS
     )
 
     success_count = 0
@@ -196,10 +186,10 @@ def main(limit: Optional[int], output_path: str) -> None:
     with out_path.open("w", encoding="utf-8") as handle:
         progress = tqdm(records, total=len(records), desc="Generating MCQ distractors")
         for row in progress:
-            case_id = str(row.get("case_id") or row.get("id") or "unknown")
-            case_prompt = (row.get("case_prompt") or "").strip()
-            final_diagnosis = (row.get("final_diagnosis") or "").strip()
-            diagnostic_reasoning = (row.get("diagnostic_reasoning") or "").strip()
+            case_id = str(row.get("Unnamed: 0", "unknown"))
+            case_prompt = row.get("case_prompt").strip()
+            final_diagnosis = row.get("final_diagnosis").strip()
+            diagnostic_reasoning = row.get("diagnostic_reasoning").strip()
 
             if not case_prompt or not final_diagnosis or not diagnostic_reasoning:
                 skipped_count += 1
@@ -229,9 +219,9 @@ def main(limit: Optional[int], output_path: str) -> None:
                 "case_prompt": case_prompt,
                 "final_diagnosis": final_diagnosis,
                 "distractors": distractors,
-                "original_diagnostic_reasoning": diagnostic_reasoning,
+                "diagnostic_reasoning": diagnostic_reasoning,
             }
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            handle.write(json.dump(record, ensure_ascii=False) + "\n")
             success_count += 1
             progress.set_postfix(success=success_count, skipped=skipped_count)
 
@@ -253,7 +243,7 @@ if __name__ == "__main__":
         "--output_path",
         type=str,
         default=DEFAULT_OUTPUT_PATH,
-        help="Path for output JSONL",
+        help="Path for output JSON",
     )
 
     args = parser.parse_args()
