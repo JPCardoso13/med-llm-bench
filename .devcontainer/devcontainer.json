@@ -5,12 +5,14 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
   "workspaceFolder": "/app",
+  "runArgs": [
+    "--gpus", "all",
+    "--env-file", ".env",
+    "--volume", "hf-cache:/root/.cache/huggingface"
+  ],
   "customizations": {
     "vscode": {
       "extensions": ["ms-python.python"]
     }
-  },
-  "runArgs": [
-    "--gpus", "all"  
-  ]
+  }
 }
