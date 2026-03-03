@@ -12,6 +12,7 @@ DATASET = "zou-lab/MedCaseReasoning"
 SPLIT = "test"
 MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
 DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset.jsonl"
+FORMATTED_DIAGNOSES_PATH = "data/interim/medcasereasoning/formatted_diagnoses_test.jsonl"
 MAX_RETRIES = 3
 TEMPERATURE_SCHEDULE = [0.7, 0.5, 0.3]
 NUM_GPUS = 1
@@ -22,20 +23,18 @@ Task:
 Given a patient case prompt, diagnostic reasoning, and the final diagnosis, produce exactly 3 incorrect but clinically plausible differential diagnoses (distractors).
 
 Rules:
-1. Plausibility: Extract distractors explicitly mentioned in the diagnostic_reasoning if possible. Otherwise, infer plausible ones from the case_prompt.
-2. Uniqueness: Distractors must NOT be the same as, or aliases/synonyms of, the final diagnosis.
-3. Length & Complexity: Output ONLY the core diagnostic entity. Do NOT include underlying causes, mechanisms, or compound conditions.
+1. Extract distractors explicitly mentioned in the diagnostic_reasoning if possible. Otherwise, infer plausible ones from the case_prompt.
+2. Distractors must NOT be the same as, or aliases/synonyms of, the final diagnosis.
+3. Output ONLY the core diagnostic entity. Do NOT include underlying causes, mechanisms, or compound conditions.
     - BAD: "Acute Kidney Injury due to Contrast-Induced Nephropathy"
     - GOOD: "Acute kidney injury"
     - BAD: "Myocardial Infarction and Hyperkalemia-induced Bradyarrhythmia"
     - GOOD: "Myocardial infarction"
-4. Formatting & Casing: Use standard medical Sentence case. Capitalize only the first letter of the diagnosis, proper nouns (eponyms), and standard acronyms. NEVER use camelCase or snake_case.
+4. Use standard medical Sentence case. Capitalize only the first letter of the diagnosis, proper nouns (eponyms), and standard acronyms.
     - BAD: "congestive heart failure" -> GOOD: "Congestive heart failure"
     - BAD: "lyme disease" -> GOOD: "Lyme disease"
     - BAD: "hiv infection" -> GOOD: "HIV infection"
-    - BAD: "LikeThis" or "like_this" -> GOOD: "Like this"
 
-Output Format:
 Return ONLY valid JSON in this exact format:
 {"distractors": ["d1", "d2", "d3"]}
 """
@@ -171,6 +170,16 @@ def main(limit: Optional[int], output_path: str) -> None:
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Load formatted diagnoses mapping
+    formatted_diagnoses_path = Path(FORMATTED_DIAGNOSES_PATH)
+    diagnosis_mapping: Dict[str, str] = {}
+    with formatted_diagnoses_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                entry = json.loads(line)
+                diagnosis_mapping[entry["pmc_id"]] = entry["formatted_diagnosis"]
+    print(f"Loaded {len(diagnosis_mapping)} formatted diagnoses from {formatted_diagnoses_path}")
+
     records = load_dataset(DATASET, split=SPLIT)
     records = records.select(range(min(limit, len(records)))) if limit else records
 
@@ -190,7 +199,8 @@ def main(limit: Optional[int], output_path: str) -> None:
         for row in progress:
             case_id = str(row.get("Unnamed: 0", "unknown"))
             case_prompt = row.get("case_prompt", "").strip()
-            final_diagnosis = row.get("final_diagnosis", "").strip()
+            pmc_id = row.get("pmcid", "").strip()
+            final_diagnosis = diagnosis_mapping.get(pmc_id, "").strip()
             diagnostic_reasoning = row.get("diagnostic_reasoning", "").strip()
 
             if not case_prompt or not final_diagnosis or not diagnostic_reasoning:
