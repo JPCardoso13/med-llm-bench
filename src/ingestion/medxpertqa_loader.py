@@ -1,8 +1,8 @@
 import logging
 import uuid
 from typing import List, Optional
-from src.ingestion.base_loader import BaseLoader, BenchmarkSample
-from src.schemas.mcqsample import MCQSample
+from .base_loader import BaseLoader, BenchmarkSample
+from src.schemas import MCQSample
 from pydantic import ValidationError
 import re
 

@@ -2,8 +2,8 @@ import logging
 import uuid
 from typing import List, Optional
 from pydantic import ValidationError
-from src.ingestion.base_loader import BaseLoader, BenchmarkSample
-from src.schemas.generativesample import GenerativeSample
+from .base_loader import BaseLoader, BenchmarkSample
+from src.schemas import GenerativeSample
 
 logger = logging.getLogger(__name__)
 

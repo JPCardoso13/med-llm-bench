@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Union, Optional
 import json
-from src.schemas.mcqsample import MCQSample
-from src.schemas.generativesample import GenerativeSample
+from src.schemas import MCQSample, GenerativeSample
 
 BenchmarkSample = Union[MCQSample, GenerativeSample]
 
