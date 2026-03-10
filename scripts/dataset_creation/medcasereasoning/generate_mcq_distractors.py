@@ -9,13 +9,13 @@ from vllm import LLM, SamplingParams
 
 
 DATASET = "zou-lab/MedCaseReasoning"
-SPLIT = "test"
-MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
-DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset.jsonl"
-FORMATTED_DIAGNOSES_PATH = "data/interim/medcasereasoning/formatted_diagnoses_test.jsonl"
+SPLIT = "val"
+MODEL_NAME = "Qwen/Qwen3-32B-AWQ"
+DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset_val.jsonl"
+FORMATTED_DIAGNOSES_PATH = "data/interim/medcasereasoning/formatted_diagnoses_val.jsonl"
 MAX_RETRIES = 3
 TEMPERATURE_SCHEDULE = [0.7, 0.5, 0.3]
-NUM_GPUS = 1
+NUM_GPUS = 2
 
 SYSTEM_PROMPT = """You are an expert clinical reasoning assistant.
 
@@ -26,17 +26,18 @@ Rules:
 1. Extract distractors explicitly mentioned in the diagnostic_reasoning if possible. Otherwise, infer plausible ones from the case_prompt.
 2. Distractors must NOT be the same as, or aliases/synonyms of, the final diagnosis.
 3. Output ONLY the core diagnostic entity. Do NOT include underlying causes, mechanisms, or compound conditions.
-    - BAD: "Acute Kidney Injury due to Contrast-Induced Nephropathy"
-    - GOOD: "Acute kidney injury"
-    - BAD: "Myocardial Infarction and Hyperkalemia-induced Bradyarrhythmia"
-    - GOOD: "Myocardial infarction"
+    - BAD: "Acute Kidney Injury due to Contrast-Induced Nephropathy" -> GOOD: "Acute kidney injury"
+    - BAD: "Myocardial Infarction and Hyperkalemia-induced Bradyarrhythmia" -> GOOD: "Myocardial infarction"
 4. Use standard medical Sentence case. Capitalize only the first letter of the diagnosis, proper nouns (eponyms), and standard acronyms.
     - BAD: "congestive heart failure" -> GOOD: "Congestive heart failure"
     - BAD: "lyme disease" -> GOOD: "Lyme disease"
+    - BAD: "Acute Pancreatitis" -> GOOD: "Acute pancreatitis"
     - BAD: "hiv infection" -> GOOD: "HIV infection"
 
 Return ONLY valid JSON in this exact format:
 {"distractors": ["d1", "d2", "d3"]}
+
+/no_think
 """
 
 
@@ -47,7 +48,9 @@ def normalize_text(text: str) -> str:
 
 
 def extract_json(text: str) -> Optional[Dict[str, object]]:
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    text_without_thoughts = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    
+    match = re.search(r"\{.*\}", text_without_thoughts, flags=re.DOTALL)
     if not match:
         return None
     
@@ -101,7 +104,6 @@ def build_user_prompt(
         return base
 
     if attempt == 2:
-        # print("WARNING: Retry loop has been triggered.")
         feedback = previous_failure or "Previous output did not satisfy validation."
         return (
             f"{base}\n\n"
@@ -129,7 +131,7 @@ def generate_distractors_for_case(
 
     for attempt in range(1, MAX_RETRIES + 1):
         temperature = TEMPERATURE_SCHEDULE[attempt - 1]
-        sampling_params = SamplingParams(temperature=temperature, max_tokens=256)
+        sampling_params = SamplingParams(temperature=temperature, max_tokens=512)
 
         prompt = build_user_prompt(
             case_prompt=case_prompt,
@@ -148,6 +150,10 @@ def generate_distractors_for_case(
 
         output = llm.chat(messages, sampling_params=sampling_params, use_tqdm=False)
         text = output[0].outputs[0].text
+
+        if attempt > 1:
+            print(f"\n[DEBUG - Attempt {attempt}]")
+            print(f"LLM RESPONSE:\n{repr(text)}")
 
         payload = extract_json(text)
         if payload is None:
@@ -185,9 +191,11 @@ def main(limit: Optional[int], output_path: str) -> None:
 
     llm = LLM(
         model=MODEL_NAME,
-        gpu_memory_utilization=0.9,
+        gpu_memory_utilization=0.85,
+        enforce_eager=True,
         tensor_parallel_size=NUM_GPUS,
-        max_model_len=2048
+        distributed_executor_backend="ray",
+        max_model_len=4096
     )
 
     success_count = 0
