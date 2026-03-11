@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import ClassVar, List, Optional, Set, Union
 import json
 from src.schemas import MCQSample, GenerativeSample
 
@@ -12,20 +12,31 @@ class BaseLoader(ABC):
 
     Attributes:
         path_or_name (str): Local file path or dataset identifier.
-        task_type (str): Task format to load, either "mcq" or "generation".
+        task_type (str): Task format to load.
+        subset (Optional[str]): Dataset subset name if applicable. Defaults to None.
         split (Optional[str]): Dataset split name if applicable. Defaults to None.
 
     Raises:
-        ValueError: If task_type is not one of the supported values.
+        ValueError: If task_type is not supported by the loader.
     """
 
-    def __init__(self, path_or_name: str, task_type: str, split: Optional[str] = None):
+    ALLOWED_TASK_TYPES: ClassVar[Set[str]] = {"mcq", "generation"}
+
+    def __init__(self, path_or_name: str, task_type: str, subset: Optional[str] = None, split: Optional[str] = None):
         self.path_or_name = path_or_name
         self.task_type = task_type
+        self.subset = subset
         self.split = split
 
-        if self.task_type not in ["mcq", "generation"]:
-            raise ValueError(f"Invalid task_type: {self.task_type}. Must be 'mcq' or 'generation'.")
+        self._validate_task_type()
+
+    def _validate_task_type(self) -> None:
+        if self.task_type not in self.ALLOWED_TASK_TYPES:
+            allowed = ", ".join(sorted(self.ALLOWED_TASK_TYPES))
+            raise ValueError(
+                f"{self.__class__.__name__} supports task_type in [{allowed}], "
+                f"got '{self.task_type}'."
+            )
 
     @abstractmethod
     def load(self) -> List[BenchmarkSample]:
