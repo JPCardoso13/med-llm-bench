@@ -72,7 +72,7 @@ class MeQSumLoader(BaseLoader):
                     )
                     raw_data = load_dataset("parquet", data_files={split: parquet_url}, split=split)
                 else:
-                    raise  # In case it's a different error
+                    raise  # In case it errors for another reason
 
         samples: List[BenchmarkSample] = []
         logger.info("Processing %s entries...", len(raw_data))

@@ -2,9 +2,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar, List, Optional, Set, Union
 import json
+
 from src.schemas import MCQSample, GenerativeSample
 
+
 BenchmarkSample = Union[MCQSample, GenerativeSample]
+
 
 class BaseLoader(ABC):
     """
