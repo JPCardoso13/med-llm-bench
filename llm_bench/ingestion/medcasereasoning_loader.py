@@ -3,7 +3,7 @@ import uuid
 from typing import List, Optional
 from pydantic import ValidationError
 from .base_loader import BaseLoader, BenchmarkSample
-from src.schemas import GenerativeSample
+from llm_bench.schemas import GenerativeSample
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from datasets import load_dataset
 
 from .base_loader import BaseLoader, BenchmarkSample
-from src.schemas import GenerativeSample
+from llm_bench.schemas import GenerativeSample
 
 logger = logging.getLogger(__name__)
 

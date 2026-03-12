@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import List, Optional
 from .base_loader import BaseLoader, BenchmarkSample
-from src.schemas import MCQSample, GenerativeSample
+from llm_bench.schemas import MCQSample, GenerativeSample
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)

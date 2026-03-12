@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import ClassVar, List, Optional, Set, Union
 import json
 
-from src.schemas import MCQSample, GenerativeSample
+from llm_bench.schemas import MCQSample, GenerativeSample
 
 
 BenchmarkSample = Union[MCQSample, GenerativeSample]

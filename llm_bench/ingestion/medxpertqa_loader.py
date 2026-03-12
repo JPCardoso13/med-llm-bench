@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import List, Optional
 from .base_loader import BaseLoader, BenchmarkSample
-from src.schemas import MCQSample
+from llm_bench.schemas import MCQSample
 from pydantic import ValidationError
 import re
 
