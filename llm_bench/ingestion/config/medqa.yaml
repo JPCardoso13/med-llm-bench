@@ -1,0 +1,12 @@
+dataset: "GBaker/MedQA-USMLE-4-options"
+task_type: "mcq"
+schema: "MCQSample"
+eval_split: "test"
+fewshot_split: "train"
+
+mapping:
+  question: "question"
+  options: "options"
+  answer_idx: "answer_idx"
+  grouping:
+    meta_info: "meta_info"

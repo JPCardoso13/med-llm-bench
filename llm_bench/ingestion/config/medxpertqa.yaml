@@ -1,0 +1,17 @@
+# configs/medxpertqa.yaml
+dataset: "TsinghuaC3I/MedXpertQA"
+subset: "Text"
+task_type: "mcq"
+schema: "MCQSample"
+eval_split: "test"
+fewshot_split: "dev"
+
+mapping:
+  id: "id"
+  question: "question"
+  options: "options"
+  answer_idx: "label"
+  grouping:
+    medical_task: "medical_task"
+    body_system: "body_system"
+    question_type: "question_type"

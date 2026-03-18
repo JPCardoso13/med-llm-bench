@@ -1,0 +1,13 @@
+# configs/meqsum.yaml
+dataset:
+  eval: "https://huggingface.co/datasets/bigbio/meqsum/resolve/refs%2Fconvert%2Fparquet/meqsum_bigbio_t2t/train/0000.parquet"
+  fewshot: "https://huggingface.co/datasets/bigbio/meqsum/resolve/refs%2Fconvert%2Fparquet/meqsum_bigbio_t2t/train/0000.parquet"
+task_type: "generation"
+schema: "GenerativeSample"
+eval_split: "train[95%:]"
+fewshot_split: "train[:-5%]"
+
+mapping:
+  id: "id"
+  question: "text_1"
+  answer: "text_2"
