@@ -1,14 +1,16 @@
-# configs/medcase_reasoning.yaml
-dataset: "zou-lab/MedCaseReasoning"
-task_type: "generation"
+source:
+  hub_path: "zou-lab/MedCaseReasoning"
+
+splits:
+  eval: "test"
+  fewshot: "val"
+
 schema: "GenerativeSample"
-eval_split: "test"
-fewshot_split: "train"
 
 mapping:
-  # 'id' is omitted; the YamlLoader will hash the question text
   question: "case_prompt"
-  answer: "diagnostic_reasoning"
+  ref_reasoning: "diagnostic_reasoning"
+  answer: "final_diagnosis"
   metadata:
     pmcid: "pmcid"
     title: "title"

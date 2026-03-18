@@ -1,10 +1,12 @@
-# configs/pubmed_summarization.yaml
-dataset: "ccdv/pubmed-summarization"
-subset: "document"
-task_type: "generation"
+source:
+  hub_path: "ccdv/pubmed-summarization"
+  subset: "document"
+
+splits:
+  eval: "test[:1000]"
+  fewshot: "train[:1000]"
+
 schema: "GenerativeSample"
-eval_split: "test[:1000]"
-fewshot_split: "train[:1000]"
 
 mapping:
   question: "article"

@@ -1,8 +1,11 @@
-dataset: "GBaker/MedQA-USMLE-4-options"
-task_type: "mcq"
+source:
+  hub_path: "GBaker/MedQA-USMLE-4-options"
+
+splits:
+  eval: "test"
+  fewshot: "train"
+
 schema: "MCQSample"
-eval_split: "test"
-fewshot_split: "train"
 
 mapping:
   question: "question"

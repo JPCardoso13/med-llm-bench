@@ -1,10 +1,12 @@
-# configs/medxpertqa.yaml
-dataset: "TsinghuaC3I/MedXpertQA"
-subset: "Text"
-task_type: "mcq"
+source:
+  hub_path: "TsinghuaC3I/MedXpertQA"
+  subset: "Text"
+
+splits:
+  eval: "test"
+  fewshot: "dev"
+
 schema: "MCQSample"
-eval_split: "test"
-fewshot_split: "dev"
 
 mapping:
   id: "id"
