@@ -3,6 +3,7 @@ from .medqa_loader import MedQALoader
 from .medxpertqa_loader import MedXpertLoader
 from .medcasereasoning_loader import MedCaseReasoningLoader
 from .meqsum_loader import MeQSumLoader
+from .yaml_loader import YamlLoader
 
 __all__ = [
 	"BaseLoader",
@@ -11,4 +12,5 @@ __all__ = [
 	"MedXpertLoader",
 	"MedCaseReasoningLoader",
 	"MeQSumLoader",
+	"YamlLoader",
 ]
