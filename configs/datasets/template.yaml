@@ -8,9 +8,9 @@ source:
   # OPTION A: Hugging Face Hub
   hub_path: "Organization/DatasetName"
   subset: "OptionalSubset" # Remove if the dataset has no subsets
-  
+
   # OPTION B: Single Local File or Direct URL (Requires 'splits' block below to divide it)
-  # data_files: "data/my_dataset.parquet" 
+  # data_files: "data/my_dataset.parquet"
 
   # OPTION C: Explicit Local Files (Omit the 'splits' block below if using this)
   # data_files:
@@ -18,7 +18,7 @@ source:
   #   fewshot: "data/fewshot_set.jsonl"
 
 # 2. SPLITS DEFINITION (Required for Option A & B above)
-# Uses Hugging Face slicing syntax to grab data. 
+# Uses Hugging Face slicing syntax to grab data.
 splits:
   eval: "test"                # e.g., "test", "test[:1000]", "train[80%:]"
   fewshot: "train"            # e.g., "train", "train[:50]" (can be null if 0-shot only)
@@ -27,7 +27,7 @@ splits:
 schema: "MCQSample"           # Options: "MCQSample" or "GenerativeSample"
 
 # 4. PREPROCESSING (Optional)
-# Point to a Python file containing a `def preprocess(row):` function if the data 
+# Point to a Python file containing a `def preprocess(row):` function if the data
 # needs complex manipulation (like list-to-dict conversion) before mapping.
 # preprocess_script: "utils/custom_transforms/my_dataset_transform.py"
 
@@ -36,12 +36,12 @@ schema: "MCQSample"           # Options: "MCQSample" or "GenerativeSample"
 mapping:
   # Base Fields
   id: "raw_id_column"         # Optional: Loader will auto-hash the question if omitted
-  question: "prompt_text"     
-  
+  question: "prompt_text"
+
   # MCQ Specific Fields (Omit if Generative)
-  options: "choices_dict"     
-  answer_idx: "correct_key"   
-  
+  options: "choices_dict"
+  answer_idx: "correct_key"
+
   # Generative Specific Fields (Omit if MCQ)
   # answer: "ground_truth"
   # context: "reference_text"
@@ -55,7 +55,7 @@ mapping:
   grouping:
     category: "domain_column"
     difficulty: "level_column"
-  
+
   # Metadata stores raw values for debugging or reference but isn't aggregated
   metadata:
     url: "source_link"

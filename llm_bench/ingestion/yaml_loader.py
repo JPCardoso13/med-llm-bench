@@ -28,6 +28,11 @@ class YamlLoader(BaseLoader):
         self.eval_split = splits_cfg.get("eval")
         self.fewshot_split = splits_cfg.get("fewshot")
 
+        if self.hub_path and self.data_files:
+            raise ValueError("Configuration cannot contain both 'hub_path' and 'data_files'. Choose one.")
+        if isinstance(self.data_files, dict) and (self.eval_split or self.fewshot_split):
+            raise ValueError("Cannot define 'splits' slicing when using explicit dictionary paths in 'data_files'.")
+
         self.mapping = self.config.get("mapping", {})
         self.preprocess = None
 

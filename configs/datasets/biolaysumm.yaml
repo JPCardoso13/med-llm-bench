@@ -1,0 +1,16 @@
+source:
+  hub_path: "BioLaySumm/BioLaySumm2025-PLOS"
+
+splits:
+  eval: "test"
+  fewshot: "validation"
+
+schema: "GenerativeSample"
+
+mapping:
+  question: "Write a lay summary for the following biomedical article:\n\n{{ article }}"
+  answer: "summary"
+
+  metadata:
+    year: "year"
+    title: "title"
