@@ -1,0 +1,24 @@
+source:
+  hub_path: "nsk7153/MedCalc-Bench-Verified"
+
+splits:
+  eval: "test"
+  fewshot: "one_shot"
+
+schema: "GenerativeSample"
+
+mapping:
+  question: "Question"
+  context: "Patient Note"
+  answer: "Ground Truth Answer"
+  ref_reasoning: "Ground Truth Explanation"
+  grouping:
+    calculator_name: "Calculator Name"
+    category: "Category"
+    output_type: "Output Type"
+    note_type: "Note Type"
+  metadata:
+    note_id: "Note ID"
+    relevant_entities: "Relevant Entities"
+    lower_limit: "Lower Limit"
+    upper_limit: "Upper Limit"
