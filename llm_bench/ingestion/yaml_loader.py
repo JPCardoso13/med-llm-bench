@@ -20,6 +20,7 @@ class YamlLoader(BaseLoader):
         super().__init__(schema_type=self.config.get("schema"))
 
         source_cfg = self.config.get("source", {})
+        self.source_name = source_cfg.get("name")
         self.hub_path = source_cfg.get("hub_path")
         self.subset = source_cfg.get("subset")
         self.data_files = source_cfg.get("data_files")
@@ -44,8 +45,8 @@ class YamlLoader(BaseLoader):
 
     def load(self) -> Dict[str, List[Any]]:
         result = {"eval": [], "fewshot": []}
-        
-        ds_name = (self.hub_path or str(self.data_files or "local")).split('/')[-1]
+
+        ds_name = self.source_name or (self.hub_path or str(self.data_files or "local")).split('/')[-1]
 
         if self.eval_split or (isinstance(self.data_files, dict) and "eval" in self.data_files):
             result["eval"] = self._load_split(self.eval_split, ds_name, is_fewshot=False)

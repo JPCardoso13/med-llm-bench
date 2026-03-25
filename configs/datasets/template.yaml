@@ -5,6 +5,10 @@
 # 1. SOURCE DEFINITION (Required)
 # Define where the data lives. You MUST use either `hub_path` OR `data_files`.
 source:
+  # Optional explicit source label stored in each sample's `source` field.
+  # Use this when hub/path-derived names are too vague (e.g., "eval.jsonl").
+  # name: "my_dataset_name"
+
   # OPTION A: Hugging Face Hub
   hub_path: "Organization/DatasetName"
   subset: "OptionalSubset" # Remove if the dataset has no subsets
