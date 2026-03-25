@@ -64,7 +64,7 @@ def build_dataset():
 
             # Build the final flat record
             record = {
-                "id": id_counter,
+                "id": str(id_counter),
                 "question": full_question,
                 "options": options_dict,
                 "answer_idx": answer_idx,

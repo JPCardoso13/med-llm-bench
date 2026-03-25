@@ -1,0 +1,19 @@
+source:
+  name: "medcasemcq"
+  data_files:
+    eval: "data/processed/medcasemcq/eval.jsonl"
+
+schema: "MCQSample"
+
+preprocess_script: "scripts/dataset_creation/medcasemcq/preprocess.py"
+
+mapping:
+  id: "id"
+  question: "question"
+  options: "options"
+  answer_idx: "answer_idx"
+  grouping:
+    specialties: "specialties"
+  metadata:
+    pmc_id: "pmc_id"
+    article_link: "article_link"
