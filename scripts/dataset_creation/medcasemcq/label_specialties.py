@@ -3,37 +3,24 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
-INPUT_PATH = "data/processed/mcr_mcq/mcr_mcq.jsonl"
-OUTPUT_PATH = "data/processed/mcr_mcq/mcr_mcq_labeled.jsonl"
+
+INPUT_PATH = "data/preprocessed/medcasemcq/eval.jsonl"
+OUTPUT_PATH = "data/processed/medcasemcq/eval.jsonl"
+DEFAULT_ERROR_LOG_PATH = "logs/medcasemcq/specialty_labeling_errors.jsonl"
+
 MODEL_NAME = "Qwen/Qwen3-32B-AWQ"
 NUM_GPUS = 2
 MAX_RETRIES = 3
-TEMPERATURE_SCHEDULE = [0.7, 0.5, 0.3]
+TEMPERATURE_SCHEDULE = [0.1, 0.3, 0.5] 
 
 SPECIALTIES_LIST = [
-    "Cardiology",
-    "Pulmonology",
-    "Gastroenterology / Hepatology",
-    "Nephrology",
-    "Endocrinology",
-    "Rheumatology",
-    "Hematology",
-    "Oncology",
-    "Infectious Disease",
-    "Neurology",
-    "Dermatology",
-    "Immunology / Allergy",
-    "Medical Genetics",
-    "Pediatrics",
-    "Psychiatry",
-    "Obstetrics / Gynecology",
-    "Toxicology",
-    "Urology",
-    "Surgery",
-    "General Internal Medicine"
+    "Cardiology", "Pulmonology", "Gastroenterology / Hepatology", "Nephrology",
+    "Endocrinology", "Rheumatology", "Hematology", "Oncology", "Infectious Disease",
+    "Neurology", "Dermatology", "Immunology / Allergy", "Medical Genetics", "Pediatrics",
+    "Psychiatry", "Obstetrics / Gynecology", "Toxicology", "Urology", "General Surgery",
+    "Ophthalmology", "Otolaryngology", "Orthopedics", "General Internal Medicine"
 ]
 
 SYSTEM_PROMPT = f"""You are an expert medical classification assistant.
@@ -44,14 +31,21 @@ Classify the given medical case into 1 to 2 applicable medical specialties.
 Rules:
 1. You MUST choose from the following exact list of specialties:
 {json.dumps(SPECIALTIES_LIST, indent=2)}
-2. Anchor your classification STRICTLY to the 'Correct Diagnosis'. Do NOT tag specialties based on misdiagnoses or initial consultations.
-3. Be conservative. Output exactly 1 to 2 specialties. 
-4. DO NOT hallucinate specialties like 'Ophthalmology' or 'Orthopedics' if they aren't on the list. Map them to the closest systemic specialty or General Internal Medicine.
-5. Return ONLY valid JSON in this exact format:
-{{"specialties": ["Specialty 1"]}}
+2. Anchor your classification STRICTLY to the 'Diagnosis'.
+3. Account for patient demographics. If the patient is a child or infant, include 'Pediatrics'.
+4. Be conservative. Output exactly 1 to 2 specialties. 
+5. Return ONLY valid JSON in the exact given format.
+
+Example Input:
+Case Prompt: A 6-year-old boy presents with right lower quadrant pain...
+Diagnosis: Acute Appendicitis
+
+Example Output:
+{{"specialties": ["Pediatrics", "General Surgery"]}}
 
 /no_think
 """
+
 
 def extract_json(text: str) -> Optional[Dict[str, object]]:
     text_without_thoughts = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
@@ -62,6 +56,7 @@ def extract_json(text: str) -> Optional[Dict[str, object]]:
         return json.loads(match.group(0))
     except json.JSONDecodeError:
         return None
+
 
 def validate_specialties(payload: object) -> Tuple[bool, str, Optional[List[str]]]:
     if not isinstance(payload, dict) or "specialties" not in payload:
@@ -80,58 +75,71 @@ def validate_specialties(payload: object) -> Tuple[bool, str, Optional[List[str]
     cleaned = list(dict.fromkeys(cleaned))
     return True, "valid", cleaned
 
-def label_case(llm: LLM, question: str, correct_diagnosis: str) -> Tuple[List[str], bool]:
-    """Returns a tuple of (specialties_list, is_defaulted)"""
-    previous_failure = None
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        temperature = TEMPERATURE_SCHEDULE[attempt - 1]
-        sampling_params = SamplingParams(temperature=temperature, max_tokens=128)
+def process_batch(llm: LLM, records: List[dict], attempt: int) -> Tuple[List[dict], List[dict]]:
+    temperature = TEMPERATURE_SCHEDULE[attempt - 1]
+    sampling_params = SamplingParams(temperature=temperature, max_tokens=128)
+
+    messages = []
+    for row in records:
+        diagnosis = row["options"][row["answer_idx"]]
+        user_content = f"Case Prompt:\n{row['question']}\n\nDiagnosis:\n{diagnosis}\n\nReturn JSON only."
         
-        user_content = f"Case Prompt:\n{question}\n\nCorrect Diagnosis:\n{correct_diagnosis}\n\nReturn JSON only."
-        if previous_failure:
-            user_content += f"\n\nValidation failed from previous attempt: {previous_failure}. Fix this and pick strictly from the list."
-
-        messages = [
+        if "failure_reason" in row:
+            user_content += f"\n\nPrevious attempt failed validation: {row['failure_reason']}. Avoid this mistake."
+        row["_last_user_prompt"] = user_content
+            
+        messages.append([
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
-        ]
+        ])
 
-        output = llm.chat([messages], sampling_params=sampling_params, use_tqdm=False)
-        text = output[0].outputs[0].text
-
-        if attempt > 1:
-            print(f"\n[DEBUG - Attempt {attempt}]")
-            print(f"LLM RESPONSE:\n{repr(text)}")
-
+    outputs = llm.chat(messages, sampling_params=sampling_params)
+    
+    successful_records = []
+    failed_records = []
+    
+    for row, output in zip(records, outputs):
+        text = output.outputs[0].text
+        row["_last_llm_output"] = text
         payload = extract_json(text)
+        
         if payload is None:
-            previous_failure = "Could not parse JSON."
+            row["failure_reason"] = "Could not parse JSON."
+            failed_records.append(row)
             continue
-
-        is_valid, reason, valid_specialties = validate_specialties(payload)
+            
+        is_valid, fail_reason, specialties = validate_specialties(payload)
         if not is_valid:
-            previous_failure = reason
+            row["failure_reason"] = fail_reason
+            failed_records.append(row)
             continue
+            
+        row["specialties"] = specialties
+        row.pop("failure_reason", None) # Present if the attempt is a retry
+        row.pop("_last_user_prompt", None)
+        row.pop("_last_llm_output", None)
+        successful_records.append(row)
+        
+    return successful_records, failed_records
 
-        return valid_specialties, False
 
-    # Fallback if it completely fails after 3 attempts
-    return ["General Internal Medicine"], True
-
-def main(limit: Optional[int], output_path: str) -> None:
+def main(limit: Optional[int], output_path: str, error_log_path: str) -> None:
     input_file = Path(INPUT_PATH)
     output_file = Path(output_path)
+    error_log_file = Path(error_log_path)
     
     if not input_file.exists():
         print(f"Error: {INPUT_PATH} not found.")
         return
 
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    error_log_file.parent.mkdir(parents=True, exist_ok=True)
+
     print("Initializing LLM engine...")
     llm = LLM(
         model=MODEL_NAME,
         gpu_memory_utilization=0.85,
-        #enforce_eager=True,
         tensor_parallel_size=NUM_GPUS,
         distributed_executor_backend="ray",
         max_model_len=4096
@@ -143,32 +151,56 @@ def main(limit: Optional[int], output_path: str) -> None:
     if limit:
         records = records[:limit]
 
-    success_count = 0
-    defaulted_count = 0
+    all_successful = []
+    current_batch = records
+    
+    for attempt in range(1, MAX_RETRIES + 1):
+        if not current_batch:
+            break
+        print(f"\n--- Attempt {attempt}/{MAX_RETRIES} (Processing {len(current_batch)} records) ---")
+        success, failed = process_batch(llm, current_batch, attempt)
+        all_successful.extend(success)
+        current_batch = failed  # The failed records become the batch for the next attempt
+        print(f"Finished attempt {attempt}:\nSuccess = {len(success)}\nFailed = {len(failed)}")
+        
+    # Handle absolute failures (Defaulting)
+    hard_failures = []
+    defaulted_count = len(current_batch)
+    
+    for row in current_batch:
+        hard_failures.append(
+            {
+                "id": row.get("id", ""),
+                "question": row.get("question", ""),
+                "failure_reason": row.get("failure_reason", ""),
+                "llm_input": row.get("_last_user_prompt", ""),
+                "llm_output": row.get("_last_llm_output", ""),
+            }
+        )
+        
+        row["specialties"] = ["General Internal Medicine"]
+        row.pop("failure_reason", None)  # Leftover from last attempt
+        row.pop("_last_user_prompt", None)
+        row.pop("_last_llm_output", None)
+        all_successful.extend([row])
 
     with output_file.open("w", encoding="utf-8") as out:
-        progress = tqdm(records, total=len(records), desc="Classifying Specialties")
-        for row in progress:
-            correct_diag = row["options"][row["answer_idx"]]
-            
-            specialties, is_defaulted = label_case(llm, row["question"], correct_diag)
-            row["specialties"] = specialties
-            
-            if is_defaulted:
-                defaulted_count += 1
-            else:
-                success_count += 1
-                
-            progress.set_postfix(success=success_count, defaulted=defaulted_count)
+        for row in all_successful:
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
 
+    with error_log_file.open("w", encoding="utf-8") as err:
+        for error_record in hard_failures:
+            err.write(json.dumps(error_record, ensure_ascii=False) + "\n")
+
     print("\nRun complete")
-    print(f"Output path: {OUTPUT_PATH}")
-    print(f"Successful records: {success_count}")
+    print(f"Output path: {output_path}")
+    print(f"Error log path: {error_log_path}")
+    print(f"Successful records: {len(all_successful) - defaulted_count}")
     print(f"Defaulted records: {defaulted_count}")
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Label medical cases with medical specialties")
+    parser = argparse.ArgumentParser(description="Label medical case questions with medical specialties")
     parser.add_argument("--limit", type=int, default=None, help="Number of entries to process")
     parser.add_argument(
         "--output_path",
@@ -176,6 +208,12 @@ if __name__ == "__main__":
         default=OUTPUT_PATH,
         help="Path for output JSONL file",
     )
+    parser.add_argument(
+        "--error_log_path",
+        type=str,
+        default=DEFAULT_ERROR_LOG_PATH,
+        help="Path to write hard-failure error logs",
+    )
 
     args = parser.parse_args()
-    main(limit=args.limit, output_path=args.output_path)
+    main(limit=args.limit, output_path=args.output_path, error_log_path=args.error_log_path)
