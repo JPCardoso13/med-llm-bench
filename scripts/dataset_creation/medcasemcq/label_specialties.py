@@ -6,9 +6,9 @@ from typing import Dict, List, Optional, Tuple
 from vllm import LLM, SamplingParams
 
 
-INPUT_PATH = "data/preprocessed/medcasemcq/eval.jsonl"
+INPUT_PATH = "data/semi_processed/medcasemcq/eval_no_specialties.jsonl"
 OUTPUT_PATH = "data/processed/medcasemcq/eval.jsonl"
-DEFAULT_ERROR_LOG_PATH = "logs/medcasemcq/specialty_labeling_errors.jsonl"
+DEFAULT_ERROR_LOG_PATH = "logs/dataset_creation/medcasemcq/specialty_labeling_errors.jsonl"
 
 MODEL_NAME = "Qwen/Qwen3-32B-AWQ"
 NUM_GPUS = 2
@@ -33,7 +33,7 @@ Rules:
 {json.dumps(SPECIALTIES_LIST, indent=2)}
 2. Anchor your classification STRICTLY to the 'Diagnosis'.
 3. Do not tag specialties based on ruled-out differential diagnoses or negative laboratory tests.
-4. Account for patient demographics: if the patient is under 18 years old, include 'Pediatrics'.
+4. Account for patient demographics: if the patient is *under* 18 years old, include 'Pediatrics'.
 5. Be conservative. Output exactly 1 to 2 specialties. 
 6. Return ONLY valid JSON in the exact given format.
 
@@ -159,7 +159,7 @@ def main(limit: Optional[int], output_path: str, error_log_path: str) -> None:
     for attempt in range(1, MAX_RETRIES + 1):
         if not current_batch:
             break
-        print(f"\n--- Attempt {attempt}/{MAX_RETRIES} (Processing {len(current_batch)} records) ---")
+        print(f"\n--- Attempt {attempt}/{MAX_RETRIES} (Processing {len(current_batch)} record(s)) ---")
         success, failed = process_batch(llm, current_batch, attempt)
         all_successful.extend(success)
         current_batch = failed  # The failed records become the batch for the next attempt
