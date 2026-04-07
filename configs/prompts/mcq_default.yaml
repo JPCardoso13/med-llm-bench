@@ -1,0 +1,23 @@
+task_type: mcq
+system_prompt: >
+  You are a medical expert. Answer the following multiple choice
+  question by selecting the single best answer. Respond with only
+  the answer letter and nothing else.
+user_turn_template: >
+  Question: {{ question }}
+
+  Options:
+  {% for key, value in options.items() %}
+  {{ key }}: {{ value }}
+  {% endfor %}
+
+  Answer:
+fewshot_template: >
+  Question: {{ question }}
+
+  Options:
+  {% for key, value in options.items() %}
+  {{ key }}: {{ value }}
+  {% endfor %}
+
+  Answer: {{ answer_idx }}

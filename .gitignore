@@ -1,15 +1,12 @@
-# Python
 __pycache__/
 *.pyc
 .venv/
 
-# VSCode
 .vscode
 
-# Other
 *.sif
 .env
-data/
+data/raw/
 .cache/
 *.log
 logs/

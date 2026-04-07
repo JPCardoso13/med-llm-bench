@@ -32,9 +32,10 @@ Rules:
 1. You MUST choose from the following exact list of specialties:
 {json.dumps(SPECIALTIES_LIST, indent=2)}
 2. Anchor your classification STRICTLY to the 'Diagnosis'.
-3. Account for patient demographics. If the patient is a child or infant, include 'Pediatrics'.
-4. Be conservative. Output exactly 1 to 2 specialties. 
-5. Return ONLY valid JSON in the exact given format.
+3. Do not tag specialties based on ruled-out differential diagnoses or negative laboratory tests.
+4. Account for patient demographics: if the patient is under 18 years old, include 'Pediatrics'.
+5. Be conservative. Output exactly 1 to 2 specialties. 
+6. Return ONLY valid JSON in the exact given format.
 
 Example Input:
 Case Prompt: A 6-year-old boy presents with right lower quadrant pain...
@@ -139,7 +140,8 @@ def main(limit: Optional[int], output_path: str, error_log_path: str) -> None:
     print("Initializing LLM engine...")
     llm = LLM(
         model=MODEL_NAME,
-        gpu_memory_utilization=0.85,
+        gpu_memory_utilization=0.90,
+        enforce_eager=True,
         tensor_parallel_size=NUM_GPUS,
         distributed_executor_backend="ray",
         max_model_len=4096
