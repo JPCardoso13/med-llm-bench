@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from vllm import LLM, SamplingParams
 
 
-INPUT_PATH = "data/semi_processed/medcasemcq/eval_no_specialties.jsonl"
+INPUT_PATH = "data/semi_processed/medcasemcq/eval/eval_no_specialties.jsonl"
 OUTPUT_PATH = "data/processed/medcasemcq/eval.jsonl"
 DEFAULT_ERROR_LOG_PATH = "logs/dataset_creation/medcasemcq/specialty_labeling_errors.jsonl"
 

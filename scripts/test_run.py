@@ -1,6 +1,6 @@
 from llm_bench.ingestion.yaml_loader import YamlLoader
 from llm_bench.backends.openai_backend import OpenAIBackend
-from llm_bench.formatters.mcq_formatter import MCQFormatter
+from llm_bench.prompt.mcq_formatter import MCQFormatter
 from llm_bench.runner.sequential_runner import SequentialRunner
 from jinja2 import Environment, BaseLoader
 import yaml
