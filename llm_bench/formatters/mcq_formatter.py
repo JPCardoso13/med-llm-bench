@@ -1,10 +1,11 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+
 from jinja2 import BaseLoader, Environment
-from llm_bench.prompt.base_formatter import BaseFormatter
-from llm_bench.schemas.generative_sample import GenerativeSample
+from llm_bench.formatters.base_formatter import BaseFormatter
+from llm_bench.schemas import MCQSample
 
 
-class GenerativeFormatter(BaseFormatter):
+class MCQFormatter(BaseFormatter):
 
     def __init__(
         self,
@@ -25,8 +26,8 @@ class GenerativeFormatter(BaseFormatter):
 
     def format(
         self,
-        sample: GenerativeSample,
-        fewshot_examples: Optional[List[GenerativeSample]] = None,
+        sample: MCQSample,
+        fewshot_examples: Optional[List[MCQSample]] = None,
     ) -> str:
         parts = []
 
@@ -38,6 +39,6 @@ class GenerativeFormatter(BaseFormatter):
 
         return self._fewshot_delimiter.join(parts)
 
-    def _render(self, template_str: str, sample: GenerativeSample) -> str:
+    def _render(self, template_str: str, sample: MCQSample) -> str:
         template = self._env.from_string(template_str)
         return template.render(**sample.model_dump())

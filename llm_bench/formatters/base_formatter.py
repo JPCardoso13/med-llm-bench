@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from llm_bench.schemas.mcq_sample import MCQSample
-from llm_bench.schemas.generative_sample import GenerativeSample
+
+from llm_bench.schemas import GenerativeSample, MCQSample
 
 Sample = MCQSample | GenerativeSample
+
+
 class BaseFormatter(ABC):
 
     @abstractmethod

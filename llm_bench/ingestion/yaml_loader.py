@@ -53,7 +53,7 @@ class YamlLoader(BaseLoader):
 
         if self.fewshot_split or (isinstance(self.data_files, dict) and "fewshot" in self.data_files):
             result["fewshot"] = self._load_split(self.fewshot_split, ds_name, is_fewshot=True)
-            
+
         return result
 
     def _load_split(self, split_name: str, ds_name: str, is_fewshot: bool) -> List[Any]:
@@ -61,12 +61,14 @@ class YamlLoader(BaseLoader):
             raw_data = load_dataset(self.hub_path, name=self.subset, split=split_name)
         elif isinstance(self.data_files, dict):
             target_path = self.data_files.get("fewshot" if is_fewshot else "eval")
-            if not target_path: return []
+            if not target_path:
+                return []
             ext = "json" if target_path.endswith("jsonl") else target_path.split('.')[-1]
             raw_data = load_dataset(ext, data_files=target_path, split="train")
         else:
             ext = "json" if str(self.data_files).endswith("jsonl") else str(self.data_files).split('.')[-1]
-            if ext not in ["json", "csv", "parquet", "txt"]: ext = "parquet" if "parquet" in str(self.data_files) else "json"
+            if ext not in ["json", "csv", "parquet", "txt"]:
+                ext = "parquet" if "parquet" in str(self.data_files) else "json"
             raw_data = load_dataset(ext, data_files=self.data_files, split=split_name)
 
         samples = []
@@ -78,10 +80,9 @@ class YamlLoader(BaseLoader):
 
             if "id" not in mapped_data:
                 mapped_data["id"] = f"{ds_name}_{idx}"
-                
+
             mapped_data["source"] = ds_name
-            
-            # Pydantic handles validation
+
             try:
                 samples.append(self.schema_class(**mapped_data))
             except ValidationError as exc:

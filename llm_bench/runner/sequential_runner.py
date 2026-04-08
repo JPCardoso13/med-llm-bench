@@ -1,11 +1,10 @@
 import random
 from pathlib import Path
 from typing import List, Optional
+
 from llm_bench.backends.base_backend import BaseBackend
-from llm_bench.prompt.base_formatter import BaseFormatter
-from llm_bench.schemas.mcq_sample import MCQSample
-from llm_bench.schemas.generative_sample import GenerativeSample
-from llm_bench.schemas.benchmark_result import BenchmarkResult
+from llm_bench.formatters.base_formatter import BaseFormatter
+from llm_bench.schemas import BenchmarkResult, GenerativeSample, MCQSample
 from llm_bench.utils.io import save_results_jsonl
 
 Sample = MCQSample | GenerativeSample
@@ -76,7 +75,7 @@ class SequentialRunner:
             return []
         return random.sample(
             self._fewshot_pool,
-            min(self._num_fewshot, len(self._fewshot_pool))
+            min(self._num_fewshot, len(self._fewshot_pool)),
         )
 
     def _extract_ref_fields(self, sample: Sample) -> dict:
