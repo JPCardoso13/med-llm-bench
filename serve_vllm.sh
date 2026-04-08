@@ -3,7 +3,7 @@
 #SBATCH -p rtx4060
 #SBATCH -A haslab
 #SBATCH --nodes=2
-#SBATCH --nodelist=aurora[06-07]
+#SBATCH --nodelist=aurora[03,06-10]
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/vllm_serve/vllm_%j.log
 
