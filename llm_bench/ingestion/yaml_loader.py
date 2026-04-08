@@ -1,7 +1,9 @@
 import yaml
 import importlib.util
 import logging
-from typing import List, Dict, Any
+import hashlib
+import json
+from typing import List, Dict, Any, Set
 from datasets import load_dataset
 from jinja2 import Template
 from pydantic import ValidationError
@@ -25,6 +27,9 @@ class YamlLoader(BaseLoader):
         self.subset = source_cfg.get("subset")
         self.data_files = source_cfg.get("data_files")
 
+        if not isinstance(self.source_name, str) or not self.source_name.strip():
+            raise ValueError("Configuration must define a non-empty 'source.name'.")
+
         splits_cfg = self.config.get("splits", {})
         self.eval_split = splits_cfg.get("eval")
         self.fewshot_split = splits_cfg.get("fewshot")
@@ -46,17 +51,18 @@ class YamlLoader(BaseLoader):
     def load(self) -> Dict[str, List[Any]]:
         result = {"eval": [], "fewshot": []}
 
-        ds_name = self.source_name or (self.hub_path or str(self.data_files or "local")).split('/')[-1]
+        ds_name = self.source_name.strip()
+        seen_ids: Set[str] = set()
 
         if self.eval_split or (isinstance(self.data_files, dict) and "eval" in self.data_files):
-            result["eval"] = self._load_split(self.eval_split, ds_name, is_fewshot=False)
+            result["eval"] = self._load_split(self.eval_split, ds_name, is_fewshot=False, seen_ids=seen_ids)
 
         if self.fewshot_split or (isinstance(self.data_files, dict) and "fewshot" in self.data_files):
-            result["fewshot"] = self._load_split(self.fewshot_split, ds_name, is_fewshot=True)
+            result["fewshot"] = self._load_split(self.fewshot_split, ds_name, is_fewshot=True, seen_ids=seen_ids)
 
         return result
 
-    def _load_split(self, split_name: str, ds_name: str, is_fewshot: bool) -> List[Any]:
+    def _load_split(self, split_name: str, ds_name: str, is_fewshot: bool, seen_ids: Set[str]) -> List[Any]:
         if self.hub_path:
             raw_data = load_dataset(self.hub_path, name=self.subset, split=split_name)
         elif isinstance(self.data_files, dict):
@@ -78,8 +84,34 @@ class YamlLoader(BaseLoader):
                 
             mapped_data = self._apply_mapping(row)
 
-            if "id" not in mapped_data:
-                mapped_data["id"] = f"{ds_name}_{idx}"
+            source_id = mapped_data.get("id")
+            if source_id is not None:
+                metadata = mapped_data.get("metadata")
+                if metadata is None:
+                    metadata = {}
+                    mapped_data["metadata"] = metadata
+                if isinstance(metadata, dict):
+                    metadata["original_id"] = str(source_id)
+
+            final_id = self._build_final_id(
+                ds_name=ds_name,
+                split_name=split_name,
+                mapped_data=mapped_data,
+                fallback_idx=idx,
+            )
+
+            if final_id in seen_ids:
+                logger.warning(
+                    "Dropping duplicate sample for source=%s split=%s idx=%s id=%s",
+                    ds_name,
+                    split_name,
+                    idx,
+                    final_id,
+                )
+                continue
+
+            seen_ids.add(final_id)
+            mapped_data["id"] = final_id
 
             mapped_data["source"] = ds_name
 
@@ -97,6 +129,22 @@ class YamlLoader(BaseLoader):
                 continue
 
         return samples
+
+    def _build_final_id(self, ds_name: str, split_name: str, mapped_data: Dict[str, Any], fallback_idx: int) -> str:
+        source_id = mapped_data.get("id")
+        if source_id is not None:
+            source_id_str = str(source_id).strip()
+            if source_id_str:
+                return f"{ds_name}:{source_id_str}"
+
+        # Build a stable content-based ID from mapped fields, excluding runtime fields.
+        canonical_payload = {k: v for k, v in mapped_data.items() if k not in {"id", "source"}}
+        payload_str = json.dumps(canonical_payload, sort_keys=True, default=str, ensure_ascii=True)
+        digest = hashlib.sha1(payload_str.encode("utf-8")).hexdigest()[:16]
+
+        if digest:
+            return f"{ds_name}:{digest}"
+        return f"{ds_name}:{split_name or 'split'}:{fallback_idx}"
 
     def _apply_mapping(self, row: Dict[str, Any]) -> Dict[str, Any]:
         mapped = {}

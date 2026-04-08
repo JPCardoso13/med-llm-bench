@@ -1,4 +1,5 @@
 source:
+  name: "medqa"
   hub_path: "GBaker/MedQA-USMLE-4-options"
 
 splits:

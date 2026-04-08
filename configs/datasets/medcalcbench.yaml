@@ -1,5 +1,5 @@
 source:
-  name: "medcalcbenchverified"
+  name: "medcalcbench"
   hub_path: "nsk7153/MedCalc-Bench-Verified"
 
 splits:

@@ -1,4 +1,5 @@
 source:
+  name: "medxpertqa"
   hub_path: "TsinghuaC3I/MedXpertQA"
   subset: "Text"
 

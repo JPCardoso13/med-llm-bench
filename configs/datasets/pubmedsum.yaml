@@ -1,4 +1,5 @@
 source:
+  name: "pubmedsum"
   hub_path: "ccdv/pubmed-summarization"
   subset: "document"
 

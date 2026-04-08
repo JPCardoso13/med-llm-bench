@@ -1,4 +1,5 @@
 source:
+  name: "medcasereasoning"
   hub_path: "zou-lab/MedCaseReasoning"
 
 splits:

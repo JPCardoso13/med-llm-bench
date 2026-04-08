@@ -1,4 +1,5 @@
 source:
+  name: "meqsum"
   data_files: "https://huggingface.co/datasets/bigbio/meqsum/resolve/refs%2Fconvert%2Fparquet/meqsum_bigbio_t2t/train/0000.parquet"
 
 splits:

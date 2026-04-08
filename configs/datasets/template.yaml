@@ -5,9 +5,9 @@
 # 1. SOURCE DEFINITION (Required)
 # Define where the data lives. You MUST use either `hub_path` OR `data_files`.
 source:
-  # Optional explicit source label stored in each sample's `source` field.
-  # Use this when hub/path-derived names are too vague (e.g., "eval.jsonl").
-  # name: "my_dataset_name"
+  # Required stable dataset name. Used to namespace each sample ID and stored
+  # in the sample `source` field (e.g., final ID format: my_dataset:123).
+  name: "my_dataset_name"
 
   # OPTION A: Hugging Face Hub
   hub_path: "Organization/DatasetName"
@@ -24,7 +24,7 @@ source:
 # 2. SPLITS DEFINITION (Required for Option A & B above)
 # Uses Hugging Face slicing syntax to grab data.
 splits:
-  eval: "test"                # e.g., "test", "test[:1000]", "train[80%:]"
+  eval: "test"                # e.g., "test", "test[:1000]"
   fewshot: "train"            # e.g., "train", "train[:50]" (can be null if 0-shot only)
 
 # 3. SCHEMA (Required)
@@ -39,7 +39,10 @@ schema: "MCQSample"           # Options: "MCQSample" or "GenerativeSample"
 # Map the raw dataset columns (values) to the schema's required fields.
 mapping:
   # Base Fields
-  id: "raw_id_column"         # Optional: Loader will auto-hash the question if omitted
+  # Optional source-side ID. If provided, final ID is: source.name:source_id.
+  # If omitted, final ID is: source.name:<stable_hash_of_mapped_content>.
+  # Duplicate final IDs are dropped with a warning.
+  id: "raw_id_column"
   question: "prompt_text"
 
   # MCQ Specific Fields (Omit if Generative)
