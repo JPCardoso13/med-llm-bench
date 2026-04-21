@@ -10,5 +10,6 @@ data/raw/
 .cache/
 *.log
 logs/
+outputs/
 
 *.egg-info/

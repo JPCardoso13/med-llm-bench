@@ -1,0 +1,81 @@
+schema_version: 1
+profile_id: systems
+scope: systems
+
+enabled: true
+
+# Aggregation dimensions for summary tables/files.
+group_by:
+  - task_name
+  - dataset
+  - model_id
+  - backend
+
+latency:
+  enabled: true
+  fields:
+    - total_latency_ms
+    - ttft_ms
+  percentiles: [50, 90, 95, 99]
+  aggregates:
+    - mean
+    - std
+    - min
+    - max
+
+inter_token_latency:
+  enabled: true
+  source_field: inter_token_latencies_ms
+  # First compute these stats per request from each request's ITL list.
+  request_level_stats: [mean, p50, p95, p99]
+  # Then aggregate the per-request values across the selected group(s).
+  percentiles: [50, 90, 95, 99]
+  aggregates:
+    - mean
+    - min
+    - max
+
+throughput:
+  enabled: true
+  fields:
+    - e2e_throughput
+    - prefill_throughput
+    - decoding_throughput
+  percentiles: [50, 90, 95, 99]
+  aggregates:
+    - mean
+    - std
+    - min
+    - max
+
+usage:
+  enabled: true
+  fields:
+    - backend_metrics.usage.prompt_tokens
+    - backend_metrics.usage.completion_tokens
+    - backend_metrics.usage.total_tokens
+  aggregates:
+    - mean
+    - min
+    - max
+    - sum
+
+telemetry:
+  enabled: true
+  fields:
+    - backend_metrics.system.sample_count_total
+    - backend_metrics.system.node_count_reporting
+    - backend_metrics.system.gpu_utilization_pct_avg_cluster
+    - backend_metrics.system.gpu_utilization_pct_max_cluster
+    - backend_metrics.system.gpu_memory_used_mb_avg_cluster
+    - backend_metrics.system.gpu_memory_used_mb_max_cluster
+  aggregates:
+    - mean
+    - min
+    - max
+
+quality_checks:
+  fail_on_missing_fields: false
+  require_system_telemetry_ok: false
+  warn_on_empty_input: true
+  warn_on_missing_telemetry: true

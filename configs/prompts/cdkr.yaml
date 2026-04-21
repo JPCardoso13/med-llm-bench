@@ -1,9 +1,13 @@
+# cdkr: Closed Domain Knowledge Retrieval
 task_type: mcq
 system_prompt: >
   You are a medical expert. Answer the following multiple choice
   question by selecting the single best answer. Respond with only
   the answer letter and nothing else.
-user_turn_template: >
+fewshot_header: "Here are some examples:\n\n"
+user_turn_template: >-
+  Now answer the following question:
+
   Question: {{ question }}
 
   Options:
@@ -12,7 +16,7 @@ user_turn_template: >
   {% endfor %}
 
   Answer:
-fewshot_template: >
+fewshot_template: >-
   Question: {{ question }}
 
   Options:

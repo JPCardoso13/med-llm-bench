@@ -7,7 +7,7 @@ from llm_bench.schemas.benchmark_result import BenchmarkResult
 def save_results_jsonl(results: List[BenchmarkResult], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "a", encoding="utf-8") as f:
         for result in results:
             f.write(result.model_dump_json() + "\n")
 

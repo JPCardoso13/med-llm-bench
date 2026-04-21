@@ -1,0 +1,40 @@
+schema_version: 1
+
+task_id: cdkr
+task_type: mcq
+
+prompt:
+  config: configs/prompts/cdkr.yaml
+
+datasets:
+  - name: medqa
+    config: configs/datasets/medqa.yaml
+    enabled: true
+    eval_limit: null
+
+  - name: medxpertqa
+    config: configs/datasets/medxpertqa.yaml
+    enabled: true
+    eval_limit: null
+
+  - name: medcasemcq
+    config: configs/datasets/medcasemcq.yaml
+    enabled: true
+    eval_limit: null
+
+execution:
+  num_fewshot: 3
+  flush_every: 10
+
+runtime:
+  telemetry_config: configs/runtime/telemetry.yaml
+
+metrics:
+  systems_profile: configs/metrics/systems.default.yaml
+  cognitive_profile: null
+
+outputs:
+  raw_dir: outputs/
+  raw_file_pattern: "{dataset}_test.jsonl"
+  systems_summary_json: outputs/reports/{task_id}_systems_summary.json
+  systems_summary_csv: outputs/reports/{task_id}_systems_summary.csv

@@ -1,0 +1,50 @@
+schema_version: 1
+
+# Stable task identifier (matches naming used in configs/prompts/)
+task_id: task_name
+
+# Task type controls formatter/evaluator family (mcq | generative)
+task_type: mcq
+
+prompt:
+  # Prompt config that defines system prompt and user/fewshot templates
+  config: configs/prompts/task_name.yaml
+
+# Datasets that belong to this task.
+# Each entry points to an existing dataset config in configs/datasets/.
+datasets:
+  - name: dataset_a
+    config: configs/datasets/dataset_a.yaml
+    enabled: true
+    # Optional per-dataset run cap for quick smoke tests. null means full split.
+    eval_limit: null
+
+  - name: dataset_b
+    config: configs/datasets/dataset_b.yaml
+    enabled: true
+    eval_limit: null
+
+execution:
+  # Few-shot controls used by formatter/runner.
+  num_fewshot: 3
+  # Flush interval for writing jsonl results.
+  flush_every: 10
+
+runtime:
+  # Runtime telemetry collection config (collector/endpoints/timeouts).
+  telemetry_config: configs/runtime/telemetry.yaml
+
+metrics:
+  # Systems-level metric profile consumed by metrics calculator.
+  systems_profile: configs/metrics/systems.default.yaml
+  # Reserved for future cognitive metrics profile.
+  cognitive_profile: null
+
+outputs:
+  # Raw per-sample records from benchmark runner.
+  raw_dir: outputs/
+  raw_file_pattern: "{dataset}_test.jsonl"
+
+  # Aggregated systems metrics outputs from calculation module.
+  systems_summary_json: outputs/reports/{task_id}_systems_summary.json
+  systems_summary_csv: outputs/reports/{task_id}_systems_summary.csv
