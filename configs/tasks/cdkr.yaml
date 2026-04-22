@@ -19,7 +19,7 @@ datasets:
 
   - name: medcasemcq
     config: configs/datasets/medcasemcq.yaml
-    enabled: true
+    enabled: false
     eval_limit: null
 
 execution:
@@ -27,10 +27,10 @@ execution:
   flush_every: 10
 
 runtime:
-  telemetry_config: configs/runtime/telemetry.yaml
+  telemetry_config: configs/runtime/telemetry.auto.yaml
 
 metrics:
-  systems_profile: configs/metrics/systems.default.yaml
+  systems_profile: configs/metrics/systems.yaml
   cognitive_profile: null
 
 outputs:

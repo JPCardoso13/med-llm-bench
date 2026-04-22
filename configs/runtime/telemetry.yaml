@@ -1,6 +1,0 @@
-telemetry:
-  enabled: false
-  collector: remote_http
-  timeout_s: 1.5
-  window_path: /window
-  endpoints: []

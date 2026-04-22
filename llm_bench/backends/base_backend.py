@@ -8,7 +8,7 @@ class BaseBackend(ABC):
     @abstractmethod
     def generate(self, messages: List[Dict[str, str]], sample_id: str, dataset: str,
                  task_name: str, sample_type: str,
-                 ref_fields: dict) -> BenchmarkResult:
+                 ref_fields: dict, grouping: dict) -> BenchmarkResult:
         """
         Send a prompt to the model and return a populated BenchmarkResult.
         Timing measurements must be captured here, at the point of generation.

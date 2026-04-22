@@ -21,6 +21,7 @@ class BenchmarkResult(BaseModel):
     backend_metrics: Dict[str, Any] = Field(default_factory=dict)
 
     ref_fields: Dict[str, Any] = Field(default_factory=dict)
+    grouping: Dict[str, List[str]] = Field(default_factory=dict)
 
     cognitive_scores: Dict[str, float] = Field(default_factory=dict)
 

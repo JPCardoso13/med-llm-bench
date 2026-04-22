@@ -10,7 +10,7 @@
 export HF_HOME=/projects/jcardoso/med-llm-bench/.cache/huggingface
 export SIF="med-llm-bench.sif"
 
-MODEL_CONFIG="${MODEL_CONFIG:-configs/models/qwen3_32b_awq.yaml}"
+MODEL_CONFIG="${MODEL_CONFIG:-configs/models/llama3_8b_instruct.yaml}"
 
 if [[ ! -f "$MODEL_CONFIG" ]]; then
     echo "Model config not found: $MODEL_CONFIG" >&2

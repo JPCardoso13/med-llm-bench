@@ -45,13 +45,12 @@ class OpenAIBackend(BaseBackend):
         task_name: str,
         sample_type: str,
         ref_fields: dict,
+        grouping: dict,
     ) -> BenchmarkResult:
 
         user_prompt = "\n".join(
             m.get("content", "") for m in messages if m.get("role") == "user"
         ).strip()
-
-        input_tokens = self._estimate_input_tokens(" ".join(m["content"] for m in messages))
 
         ttft_ms = None
         inter_token_latencies_ms = []
@@ -100,7 +99,12 @@ class OpenAIBackend(BaseBackend):
 
         total_latency_ms = (time.perf_counter() - request_start) * 1000
         response = "".join(chunks)
-        output_tokens = self._estimate_output_tokens(response)
+        usage = backend_metrics.get("usage")
+        if not usage:
+            raise RuntimeError("Backend did not return token usage; this benchmark expects usage to be present.")
+
+        input_tokens = int(usage["prompt_tokens"])
+        output_tokens = int(usage["completion_tokens"])
 
         return BenchmarkResult(
             sample_id=sample_id,
@@ -116,13 +120,8 @@ class OpenAIBackend(BaseBackend):
             inter_token_latencies_ms=inter_token_latencies_ms,
             backend_metrics=backend_metrics,
             ref_fields=ref_fields,
+            grouping=grouping,
             model_id=self._model_id,
             backend=self.backend_name,
             timestamp=datetime.utcnow(),
         )
-
-    def _estimate_input_tokens(self, prompt: str) -> int:
-        return len(prompt.split())
-
-    def _estimate_output_tokens(self, response: str) -> int:
-        return len(response.split())

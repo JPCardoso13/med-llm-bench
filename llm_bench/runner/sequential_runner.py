@@ -66,6 +66,7 @@ class SequentialRunner:
                 ]
 
                 ref_fields = self._extract_ref_fields(sample)
+                grouping = self._extract_grouping(sample)
 
                 request_context: Dict[str, Any] = {
                     "sample_id": sample.id,
@@ -85,6 +86,7 @@ class SequentialRunner:
                     task_name=self._task_name,
                     sample_type=request_context["sample_type"],
                     ref_fields=ref_fields,
+                    grouping=grouping,
                 )
 
                 request_context["request_finished_at_epoch_s"] = time.time()
@@ -160,6 +162,10 @@ class SequentialRunner:
         if isinstance(sample, GenerativeSample):
             return "generative"
         return "unknown"
+
+    def _extract_grouping(self, sample: Sample) -> dict:
+        grouping = getattr(sample, "grouping", {})
+        return grouping if isinstance(grouping, dict) else {}
 
     def _has_telemetry_issue(self, system_metrics: Dict[str, Any]) -> bool:
         if not system_metrics:

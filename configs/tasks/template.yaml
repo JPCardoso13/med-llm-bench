@@ -36,7 +36,7 @@ runtime:
 
 metrics:
   # Systems-level metric profile consumed by metrics calculator.
-  systems_profile: configs/metrics/systems.default.yaml
+  systems_profile: configs/metrics/systems.yaml
   # Reserved for future cognitive metrics profile.
   cognitive_profile: null
 
