@@ -1,0 +1,30 @@
+schema_version: 1
+
+profile_id: cognitive.mcq
+scope: cognitive
+task_type: mcq
+
+enabled: true
+
+# MCQ-specific metrics
+mcq:
+  enabled: true
+  accuracy:
+    enabled: true
+    # Extract predicted answer from model response and compare to ref_fields.answer_idx
+  parsing:
+    enabled: true
+    # Track parsing success rate and failures
+
+# Semantic similarity placeholder for future enhancement
+semantic_similarity:
+  enabled: false
+
+# LLM-as-a-judge reserved for future (disabled by default)
+llm_judge:
+  enabled: false
+
+quality_checks:
+  fail_on_missing_ref_fields: false
+  warn_on_parse_failures: true
+  warn_on_extraction_ambiguity: true

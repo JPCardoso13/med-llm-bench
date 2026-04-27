@@ -10,7 +10,7 @@ import yaml
 from llm_bench.backends import OpenAIBackend
 from llm_bench.formatters import GenerativeFormatter, MCQFormatter
 from llm_bench.ingestion import YamlLoader
-from llm_bench.metrics import calculate_system_metrics
+from llm_bench.metrics import calculate_cognitive_metrics, calculate_system_metrics
 from llm_bench.runner import SequentialRunner
 from llm_bench.telemetry import (
     NvidiaSmiTelemetryCollector,
@@ -128,11 +128,20 @@ def resolve_systems_summary_json_path(task_cfg: dict[str, Any]) -> Path:
     return Path(template.format(task_id=task_id))
 
 
+def resolve_cognitive_summary_json_path(task_cfg: dict[str, Any]) -> Path:
+    outputs_cfg = task_cfg.get("outputs", {})
+    task_id = task_cfg.get("task_id", "task")
+    template = outputs_cfg.get("cognitive_summary_json", "outputs/reports/{task_id}_cognitive_summary.json")
+    return Path(template.format(task_id=task_id))
+
+
 def main() -> None:
     load_dotenv()
 
     task_cfg = load_yaml(TASK_CONFIG_PATH)
     systems_profile = load_yaml(task_cfg["metrics"]["systems_profile"])
+    cognitive_profile_path = task_cfg.get("metrics", {}).get("cognitive_profile")
+    cognitive_profile = load_yaml(cognitive_profile_path) if cognitive_profile_path else {"enabled": False}
 
     model_cfg = load_yaml(MODEL_CONFIG_PATH)
     print(f"Using model config: {MODEL_CONFIG_PATH}")
@@ -162,7 +171,11 @@ def main() -> None:
         loader = YamlLoader(dataset_config_path)
         data = loader.load()
 
-        eval_samples = data.get("eval", [])[:PER_DATASET_EVAL_LIMIT]
+        eval_limit = ds.get("eval_limit")
+        if eval_limit is None:
+            eval_limit = PER_DATASET_EVAL_LIMIT
+
+        eval_samples = data.get("eval", [])[:int(eval_limit)]
         fewshot_samples = data.get("fewshot", [])
 
         output_path = resolve_raw_output_path(task_cfg, dataset_name)
@@ -185,14 +198,30 @@ def main() -> None:
         dataset_summary = calculate_system_metrics(results, systems_profile)
         print(f"Systems summary for {dataset_name}: groups={len(dataset_summary.get('groups', []))}")
 
+        if cognitive_profile.get("enabled", True):
+            cognitive_dataset_summary = calculate_cognitive_metrics(results, cognitive_profile)
+            print(
+                f"Cognitive summary for {dataset_name}: "
+                f"groups={len(cognitive_dataset_summary.get('groups', []))}"
+            )
+
     overall_summary = calculate_system_metrics(all_results, systems_profile)
     summary_path = resolve_systems_summary_json_path(task_cfg)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(overall_summary, indent=2), encoding="utf-8")
 
+    cognitive_summary_path = None
+    if cognitive_profile.get("enabled", True):
+        cognitive_overall_summary = calculate_cognitive_metrics(all_results, cognitive_profile)
+        cognitive_summary_path = resolve_cognitive_summary_json_path(task_cfg)
+        cognitive_summary_path.parent.mkdir(parents=True, exist_ok=True)
+        cognitive_summary_path.write_text(json.dumps(cognitive_overall_summary, indent=2), encoding="utf-8")
+
     print("\n=== CDKR test run complete ===")
     print(f"Total results: {len(all_results)}")
     print(f"Systems summary JSON: {summary_path}")
+    if cognitive_summary_path is not None:
+        print(f"Cognitive summary JSON: {cognitive_summary_path}")
 
 
 if __name__ == "__main__":

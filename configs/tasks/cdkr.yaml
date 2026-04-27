@@ -31,10 +31,11 @@ runtime:
 
 metrics:
   systems_profile: configs/metrics/systems.yaml
-  cognitive_profile: null
+  cognitive_profile: configs/metrics/cognitive.mcq.yaml
 
 outputs:
   raw_dir: outputs/
   raw_file_pattern: "{dataset}_test.jsonl"
   systems_summary_json: outputs/reports/{task_id}_systems_summary.json
   systems_summary_csv: outputs/reports/{task_id}_systems_summary.csv
+  cognitive_summary_json: outputs/reports/{task_id}_cognitive_summary.json

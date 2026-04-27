@@ -37,8 +37,8 @@ runtime:
 metrics:
   # Systems-level metric profile consumed by metrics calculator.
   systems_profile: configs/metrics/systems.yaml
-  # Reserved for future cognitive metrics profile.
-  cognitive_profile: null
+  # Cognitive metrics profile for evaluation (accuracy, parsing, etc).
+  cognitive_profile: configs/metrics/cognitive.template.yaml
 
 outputs:
   # Raw per-sample records from benchmark runner.
@@ -48,3 +48,4 @@ outputs:
   # Aggregated systems metrics outputs from calculation module.
   systems_summary_json: outputs/reports/{task_id}_systems_summary.json
   systems_summary_csv: outputs/reports/{task_id}_systems_summary.csv
+  cognitive_summary_json: outputs/reports/{task_id}_cognitive_summary.json

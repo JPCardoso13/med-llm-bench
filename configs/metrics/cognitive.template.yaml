@@ -1,0 +1,53 @@
+schema_version: 1
+
+# Stable profile identifier. Convention: cognitive.{task_type}.{variant}
+# Examples: cognitive.mcq, cognitive.generative, cognitive.mcq.with_judge
+profile_id: cognitive.template
+scope: cognitive
+
+# MCQ or generative; controls which metrics are available.
+task_type: mcq
+
+enabled: true
+
+# MCQ-specific metrics (omit for generative tasks).
+mcq:
+  enabled: true
+  accuracy:
+    enabled: true
+    # Extract predicted answer from model response and compare to ref_fields.answer_idx
+  parsing:
+    enabled: true
+    # Track when answer extraction fails or is ambiguous
+
+# Generative-specific metrics (omit for MCQ tasks).
+# generative:
+#   enabled: true
+#   exact_match:
+#     enabled: true
+#     case_sensitive: false
+#   bleu:
+#     enabled: false
+#     max_order: 4
+#   rouge:
+#     enabled: false
+#     variants: [L, 1, 2]
+
+# Reusable across task types.
+semantic_similarity:
+  enabled: false
+  # Requires bertscore dependency; compute reference vs prediction similarity.
+  # metric_name: bertscore
+  # language: en
+
+# LLM-as-a-judge (future).
+llm_judge:
+  enabled: false
+  # model_id: null
+  # judge_prompt_config: null
+  # scoring_rubric: null
+
+quality_checks:
+  fail_on_missing_ref_fields: false
+  warn_on_parse_failures: true
+  warn_on_extraction_ambiguity: true
