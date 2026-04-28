@@ -27,7 +27,7 @@ datasets:
 execution:
   # Few-shot controls used by formatter/runner.
   num_fewshot: 3
-  # Flush interval for writing jsonl results.
+  # Flush interval for writing raw results.
   flush_every: 10
 
 runtime:
@@ -43,7 +43,7 @@ metrics:
 outputs:
   # Raw per-sample records from benchmark runner.
   raw_dir: outputs/
-  raw_file_pattern: "{dataset}_test.jsonl"
+  raw_file_pattern: "{dataset}_test.json"
 
   # Aggregated systems metrics outputs from calculation module.
   systems_summary_json: outputs/reports/{task_id}_systems_summary.json

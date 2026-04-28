@@ -3,24 +3,33 @@ schema_version: 1
 profile_id: cognitive.mcq
 scope: cognitive
 task_type: mcq
+group_by:
+  - task_name
+  - dataset
+  - model_id
+  - backend
 
 enabled: true
 
-# MCQ-specific metrics
 mcq:
   enabled: true
   accuracy:
     enabled: true
-    # Extract predicted answer from model response and compare to ref_fields.answer_idx
+  precision:
+    enabled: true
+    average: macro
+  recall:
+    enabled: true
+    average: macro
+  f1:
+    enabled: true
+    average: macro
   parsing:
     enabled: true
-    # Track parsing success rate and failures
 
-# Semantic similarity placeholder for future enhancement
 semantic_similarity:
   enabled: false
 
-# LLM-as-a-judge reserved for future (disabled by default)
 llm_judge:
   enabled: false
 
