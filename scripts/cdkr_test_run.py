@@ -20,7 +20,7 @@ from llm_bench.telemetry import (
 
 
 TASK_CONFIG_PATH = Path("configs/tasks/cdkr.yaml")
-MODEL_CONFIG_PATH = Path("configs/models/llama3_8b_instruct.yaml")
+MODEL_CONFIG_PATH = Path(os.getenv("LLM_BENCH_MODEL_CONFIG", "configs/models/qwen3_32b_awq.yaml"))
 PER_DATASET_EVAL_LIMIT = 5
 
 
@@ -81,7 +81,8 @@ def build_backend(model_cfg: dict[str, Any]) -> OpenAIBackend:
 
     api_key = os.getenv("LLM_API_KEY", "EMPTY")
     temperature = float(model_cfg.get("temperature", 0.0))
-    max_tokens = int(model_cfg.get("max_tokens", 512))
+    default_max_tokens = int(os.getenv("LLM_MAX_TOKENS_DEFAULT", "1024"))
+    max_tokens = int(model_cfg.get("max_tokens", default_max_tokens))
 
     return OpenAIBackend(
         model_id=model_id,
@@ -117,7 +118,7 @@ def build_formatter(task_cfg: dict[str, Any]):
 def resolve_raw_output_path(task_cfg: dict[str, Any], dataset_name: str) -> Path:
     outputs_cfg = task_cfg.get("outputs", {})
     raw_dir = Path(outputs_cfg.get("raw_dir", "outputs"))
-    pattern = outputs_cfg.get("raw_file_pattern", "{dataset}_test.jsonl")
+    pattern = outputs_cfg.get("raw_file_pattern", "{dataset}_test.json")
     return raw_dir / pattern.format(dataset=dataset_name)
 
 

@@ -8,7 +8,7 @@ from llm_bench.formatters.base_formatter import BaseFormatter
 from llm_bench.schemas import BenchmarkResult, GenerativeSample, MCQSample
 from llm_bench.telemetry.base_collector import TelemetryCollector
 from llm_bench.telemetry.null_collector import NullTelemetryCollector
-from llm_bench.utils.io import save_results_jsonl
+from llm_bench.utils.io import save_results
 
 Sample = MCQSample | GenerativeSample
 
@@ -40,6 +40,8 @@ class SequentialRunner:
     def run(self, samples: List[Sample]) -> List[BenchmarkResult]:
         if self._output_path.exists():
             self._output_path.unlink()
+
+        write_json_array = self._output_path.suffix.lower() == ".json"
 
         run_context = {
             "task_name": self._task_name,
@@ -124,7 +126,10 @@ class SequentialRunner:
                 pending.append(result)
 
                 if len(pending) >= self._flush_every:
-                    save_results_jsonl(pending, self._output_path)
+                    if write_json_array:
+                        save_results(results, self._output_path)
+                    else:
+                        save_results(pending, self._output_path)
                     pending = []
                     print(f"Flushed results at sample {i + 1}/{len(samples)}")
         finally:
@@ -133,7 +138,10 @@ class SequentialRunner:
                 print(f"Telemetry run summary: {run_summary}")
 
         if pending:
-            save_results_jsonl(pending, self._output_path)
+            if write_json_array:
+                save_results(results, self._output_path)
+            else:
+                save_results(pending, self._output_path)
 
         print(f"Run complete. {len(results)} results saved to {self._output_path}")
         return results

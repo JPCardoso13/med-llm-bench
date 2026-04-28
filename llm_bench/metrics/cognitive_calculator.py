@@ -16,6 +16,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
             "scope": profile.get("scope", "cognitive"),
             "enabled": False,
             "sample_count": len(results),
+            "group_by": list(profile.get("group_by", ["task_name", "dataset", "model_id", "backend"])),
             "groups": [],
         }
 
@@ -35,6 +36,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
         group_summaries.append(
             _summarize_group(
                 group_key=group_key,
+                group_fields=group_fields,
                 results=group_results,
                 profile=profile,
                 parse_failures=parse_failures,
@@ -72,6 +74,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
 
 def _summarize_group(
     group_key: tuple[Any, ...],
+    group_fields: list[str],
     results: list[BenchmarkResult],
     profile: Mapping[str, Any],
     parse_failures: list[dict[str, Any]],
@@ -79,7 +82,7 @@ def _summarize_group(
     missing_ref_fields: list[dict[str, Any]],
 ) -> dict[str, Any]:
     group_summary: dict[str, Any] = {
-        "group_key": _group_key_to_label(group_key, profile.get("group_by", [])),
+        "group_key": _group_key_to_label(group_key, group_fields),
         "sample_count": len(results),
         "metrics": {},
     }
@@ -112,6 +115,9 @@ def _summarize_mcq_group(
         return {}
 
     enable_accuracy = bool(mcq_cfg.get("accuracy", {}).get("enabled", True))
+    enable_precision = bool(mcq_cfg.get("precision", {}).get("enabled", True))
+    enable_recall = bool(mcq_cfg.get("recall", {}).get("enabled", True))
+    enable_f1 = bool(mcq_cfg.get("f1", {}).get("enabled", True))
     enable_parsing = bool(mcq_cfg.get("parsing", {}).get("enabled", True))
 
     evaluated_count = 0
@@ -119,6 +125,7 @@ def _summarize_mcq_group(
     parsed_success_count = 0
     parse_failure_count = 0
     ambiguous_count = 0
+    label_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0})
 
     for result in results:
         ref_answer = str(result.ref_fields.get("answer_idx", "")).strip().upper()
@@ -135,6 +142,8 @@ def _summarize_mcq_group(
         extraction = extract_mcq_answer_letter(result.response)
         status = extraction["status"]
         pred = extraction["letter"]
+
+        label_stats.setdefault(ref_answer, {"tp": 0, "fp": 0, "fn": 0})
 
         if status == "success":
             parsed_success_count += 1
@@ -158,8 +167,16 @@ def _summarize_mcq_group(
             )
 
         evaluated_count += 1
+        if pred is not None:
+            label_stats.setdefault(pred, {"tp": 0, "fp": 0, "fn": 0})
+
         if pred is not None and pred == ref_answer:
             correct_count += 1
+            label_stats[ref_answer]["tp"] += 1
+        else:
+            label_stats[ref_answer]["fn"] += 1
+            if pred is not None:
+                label_stats[pred]["fp"] += 1
 
     summary: dict[str, Any] = {}
 
@@ -170,6 +187,18 @@ def _summarize_mcq_group(
             "accuracy": (correct_count / evaluated_count) if evaluated_count > 0 else None,
         }
 
+    if enable_precision or enable_recall or enable_f1:
+        classification_summary = _build_mcq_classification_summary(label_stats)
+
+        if enable_precision:
+            summary["precision"] = classification_summary["precision"]
+
+        if enable_recall:
+            summary["recall"] = classification_summary["recall"]
+
+        if enable_f1:
+            summary["f1"] = classification_summary["f1"]
+
     if enable_parsing:
         summary["parsing"] = {
             "parsed_success_count": parsed_success_count,
@@ -179,6 +208,58 @@ def _summarize_mcq_group(
         }
 
     return summary
+
+
+def _build_mcq_classification_summary(label_stats: Mapping[str, Mapping[str, int]]) -> dict[str, Any]:
+    labels = sorted(label_stats.keys())
+
+    per_label: dict[str, dict[str, Any]] = {}
+    precision_values: list[float] = []
+    recall_values: list[float] = []
+    f1_values: list[float] = []
+
+    for label in labels:
+        stats = label_stats[label]
+        tp = int(stats.get("tp", 0))
+        fp = int(stats.get("fp", 0))
+        fn = int(stats.get("fn", 0))
+
+        precision_denominator = tp + fp
+        recall_denominator = tp + fn
+        precision = (tp / precision_denominator) if precision_denominator > 0 else 0.0
+        recall = (tp / recall_denominator) if recall_denominator > 0 else 0.0
+        f1_denominator = precision + recall
+        f1 = (2.0 * precision * recall / f1_denominator) if f1_denominator > 0 else 0.0
+
+        precision_values.append(precision)
+        recall_values.append(recall)
+        f1_values.append(f1)
+
+        per_label[label] = {
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        }
+
+    return {
+        "labels": labels,
+        "average": "macro",
+        "precision": {
+            "value": (sum(precision_values) / len(precision_values)) if precision_values else None,
+            "per_label": per_label,
+        },
+        "recall": {
+            "value": (sum(recall_values) / len(recall_values)) if recall_values else None,
+            "per_label": per_label,
+        },
+        "f1": {
+            "value": (sum(f1_values) / len(f1_values)) if f1_values else None,
+            "per_label": per_label,
+        },
+    }
 
 
 def _build_group_keys(result: BenchmarkResult, group_fields: Iterable[str]) -> list[tuple[Any, ...]]:

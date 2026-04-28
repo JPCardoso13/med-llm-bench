@@ -80,12 +80,12 @@ datasets = [
     {
         "config": "configs/datasets/medqa.yaml",
         "name": "medqa",
-        "output": "outputs/medqa_test.jsonl",
+        "output": "outputs/medqa_test.json",
     },
     {
         "config": "configs/datasets/medxpertqa.yaml",
         "name": "medxpertqa",
-        "output": "outputs/medxpertqa_test.jsonl",
+        "output": "outputs/medxpertqa_test.json",
     },
 ]
 

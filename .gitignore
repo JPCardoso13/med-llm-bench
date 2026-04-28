@@ -5,6 +5,7 @@ __pycache__/
 .vscode
 
 *.sif
+*.out
 .env
 data/raw/
 .cache/
