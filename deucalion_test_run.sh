@@ -6,6 +6,8 @@
 #SBATCH --time=02:00:00
 #SBATCH --partition normal-a100-40
 #SBATCH --account=F202500001HPCVLABEPICUREG
+#SBATCH --output=logs/deucalion/out/vllm_%j.out
+#SBATCH --error=logs/deucalion/err/vllm_%j.err
 
 set -e
 
