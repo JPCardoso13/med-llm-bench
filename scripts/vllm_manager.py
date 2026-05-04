@@ -71,7 +71,8 @@ def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     ray_addr = os.getenv("RAY_ADDRESS") or os.getenv("SINGULARITYENV_RAY_ADDRESS")
-    distributed = bool(ray_addr)
+    tp = int(model_cfg.get("tensor_parallel_size", 1))
+    distributed = bool(ray_addr) and tp > 1
     mode = "distributed" if distributed else "single"
 
     cmd = _build_cmd(model_cfg, port, distributed)
@@ -84,7 +85,6 @@ def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path
     base_url = f"http://{host}:{port}/v1"
 
     if not _wait_for_ready(base_url, process, timeout_s):
-        # ensure logs flushed
         try:
             process.terminate()
         except Exception:

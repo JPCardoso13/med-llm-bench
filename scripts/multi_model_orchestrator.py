@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ from llm_bench.telemetry import (
 from llm_bench.utils.io import save_results_json
 
 
-TASK_CONFIG_PATH = Path("configs/tasks/cdkr.yaml")
+TASKS_DIR = Path("configs/tasks")
 MODELS_DIR = Path("configs/models")
 PER_DATASET_EVAL_LIMIT = 5
 RAW_RESULTS_DIR = Path("outputs/raw")
@@ -122,6 +123,13 @@ def build_formatter(task_cfg: dict[str, Any]):
     raise ValueError(f"Unsupported task_type: {task_type}")
 
 
+def discover_task_configs() -> list[Path]:
+    """Discover all task configs from configs/tasks/*.yaml, sorted by name."""
+    configs = list(TASKS_DIR.glob("*.yaml"))
+    configs = [c for c in configs if c.stem != "template"]  # exclude template
+    return sorted(configs)
+
+
 def discover_model_configs() -> list[Path]:
     return sorted(MODELS_DIR.glob("*.yaml"))
 
@@ -132,6 +140,7 @@ def run_benchmark_for_model(
     task_cfg: dict[str, Any],
     runtime_cfg: dict[str, Any],
     base_url: str,
+    task_id: str,
 ) -> Path:
     backend = build_backend(model_cfg, base_url)
     formatter = build_formatter(task_cfg)
@@ -159,7 +168,7 @@ def run_benchmark_for_model(
         eval_samples = data.get("eval", [])[: int(eval_limit)]
         fewshot_samples = data.get("fewshot", [])
 
-        tmp_output_path = TMP_RESULTS_DIR / model_name / f"{dataset_name}.json"
+        tmp_output_path = TMP_RESULTS_DIR / task_id / model_name / f"{dataset_name}.json"
         tmp_output_path.parent.mkdir(parents=True, exist_ok=True)
 
         runner = SequentialRunner(
@@ -179,13 +188,14 @@ def run_benchmark_for_model(
         print(f"  Dataset {dataset_name}: {len(results)} results")
 
     RAW_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    raw_path = RAW_RESULTS_DIR / f"{model_name}.json"
+    raw_path = RAW_RESULTS_DIR / task_id / f"{model_name}.json"
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
     save_results_json(all_results, raw_path)
     print(f"  Raw results: {raw_path}")
     return raw_path
 
 
-def compute_and_save_metrics(model_name: str, raw_path: Path, task_cfg: dict[str, Any], systems_profile: dict[str, Any], cognitive_profile: dict[str, Any]) -> tuple[Path, Path | None]:
+def compute_and_save_metrics(model_name: str, raw_path: Path, task_id: str, systems_profile: dict[str, Any], cognitive_profile: dict[str, Any]) -> tuple[Path, Path | None]:
     # load results
     with open(raw_path, "r", encoding="utf-8") as f:
         raw_data = json.load(f)
@@ -194,24 +204,33 @@ def compute_and_save_metrics(model_name: str, raw_path: Path, task_cfg: dict[str
     all_results = [BenchmarkResult(**r) for r in raw_data]
 
     overall_summary = calculate_system_metrics(all_results, systems_profile)
-    systems_summary_path = REPORTS_DIR / f"{task_cfg.get('task_id','task')}_{model_name}_systems_summary.json"
-    systems_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    task_report_dir = REPORTS_DIR / task_id / "model_summaries"
+    task_report_dir.mkdir(parents=True, exist_ok=True)
+    
+    systems_summary_path = task_report_dir / f"{model_name}_systems_summary.json"
     systems_summary_path.write_text(json.dumps(overall_summary, indent=2), encoding="utf-8")
 
     cognitive_summary_path = None
     if cognitive_profile.get("enabled", True):
         cognitive_overall_summary = calculate_cognitive_metrics(all_results, cognitive_profile)
-        cognitive_summary_path = REPORTS_DIR / f"{task_cfg.get('task_id','task')}_{model_name}_cognitive_summary.json"
-        cognitive_summary_path.parent.mkdir(parents=True, exist_ok=True)
+        cognitive_summary_path = task_report_dir / f"{model_name}_cognitive_summary.json"
         cognitive_summary_path.write_text(json.dumps(cognitive_overall_summary, indent=2), encoding="utf-8")
 
     return systems_summary_path, cognitive_summary_path
 
 
-def main() -> None:
-    load_dotenv()
+def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: int, startup_timeout_s: int) -> dict[str, Any]:
+    """Run all models for a single task."""
+    task_cfg = load_yaml(task_cfg_path)
+    task_id = task_cfg.get("task_id")
+    
+    if not task_id:
+        raise ValueError(f"Task config {task_cfg_path} missing 'task_id' field")
 
-    task_cfg = load_yaml(TASK_CONFIG_PATH)
+    print(f"\n{'='*80}")
+    print(f"TASK: {task_id}")
+    print(f"{'='*80}")
+
     systems_profile = load_yaml(task_cfg["metrics"]["systems_profile"])
     cognitive_profile_path = task_cfg.get("metrics", {}).get("cognitive_profile")
     cognitive_profile = load_yaml(cognitive_profile_path) if cognitive_profile_path else {"enabled": False}
@@ -219,15 +238,7 @@ def main() -> None:
     runtime_cfg_path = resolve_runtime_config_path(task_cfg)
     runtime_cfg = load_yaml(runtime_cfg_path)
 
-    model_configs = discover_model_configs()
-    if not model_configs:
-        print("No model configs found in configs/models/")
-        return
-
-    serve_port = int(os.getenv("SERVE_PORT", "8000"))
-    startup_timeout_s = int(os.getenv("VLLM_STARTUP_TIMEOUT_S", "360"))
-
-    summary = {"models": []}
+    summary = {"task_id": task_id, "models": []}
 
     for model_config_path in model_configs:
         model_name = model_config_path.stem
@@ -240,9 +251,9 @@ def main() -> None:
             print(f"  Serving at {handle.base_url} (mode={handle.mode})")
 
             os.environ["LLM_BASE_URL"] = handle.base_url
-            raw_path = run_benchmark_for_model(model_cfg, model_name, task_cfg, runtime_cfg, handle.base_url)
+            raw_path = run_benchmark_for_model(model_cfg, model_name, task_cfg, runtime_cfg, handle.base_url, task_id)
 
-            systems_path, cognitive_path = compute_and_save_metrics(model_name, raw_path, task_cfg, systems_profile, cognitive_profile)
+            systems_path, cognitive_path = compute_and_save_metrics(model_name, raw_path, task_id, systems_profile, cognitive_profile)
 
             summary["models"].append({
                 "model_name": model_name,
@@ -256,18 +267,58 @@ def main() -> None:
             summary["models"].append({"model_name": model_name, "error": str(exc)})
         finally:
             stop_vllm(handle)
+            # Give time for full cleanup between models to avoid process limit issues
+            time.sleep(2)
 
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    summary_path = REPORTS_DIR / "multi_model_run_summary.json"
+    # Write task-specific summary
+    task_report_dir = REPORTS_DIR / task_id
+    task_report_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = task_report_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"Final report written to: {summary_path}")
+    print(f"\nTask report written to: {summary_path}")
 
-    failed = [m for m in summary["models"] if "error" in m]
-    print("\nRun complete")
-    print(f"Summary: {summary_path}")
-    print(f"Successful: {len(summary['models']) - len(failed)} | Failed: {len(failed)}")
+    return summary
 
-    if failed:
+
+def main() -> None:
+    load_dotenv()
+
+    task_configs = discover_task_configs()
+    if not task_configs:
+        print("No task configs found in configs/tasks/ (excluding template.yaml)")
+        return
+
+    model_configs = discover_model_configs()
+    if not model_configs:
+        print("No model configs found in configs/models/")
+        return
+
+    serve_port = int(os.getenv("SERVE_PORT", "8000"))
+    startup_timeout_s = int(os.getenv("VLLM_STARTUP_TIMEOUT_S", "360"))
+
+    all_summaries = {"tasks": []}
+
+    for task_cfg_path in task_configs:
+        try:
+            task_summary = run_single_task(task_cfg_path, model_configs, serve_port, startup_timeout_s)
+            all_summaries["tasks"].append(task_summary)
+        except Exception as exc:
+            print(f"ERROR processing task {task_cfg_path.stem}: {exc}")
+            all_summaries["tasks"].append({"task_id": task_cfg_path.stem, "error": str(exc)})
+
+    # Write overall multi-task summary
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    overall_summary_path = REPORTS_DIR / "multi_task_summary.json"
+    overall_summary_path.write_text(json.dumps(all_summaries, indent=2), encoding="utf-8")
+    print(f"\n{'='*80}")
+    print(f"Overall multi-task summary written to: {overall_summary_path}")
+    print(f"{'='*80}")
+
+    failed_tasks = [t for t in all_summaries["tasks"] if "error" in t]
+    print(f"\nRun complete")
+    print(f"Successful tasks: {len(all_summaries['tasks']) - len(failed_tasks)} | Failed tasks: {len(failed_tasks)}")
+
+    if failed_tasks:
         sys.exit(1)
 
 
