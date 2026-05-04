@@ -4,7 +4,6 @@ scope: systems
 
 enabled: true
 
-# Aggregation dimensions for summary tables/files.
 group_by:
   - task_name
   - dataset
@@ -26,9 +25,7 @@ latency:
 inter_token_latency:
   enabled: true
   source_field: inter_token_latencies_ms
-  # First compute these stats per request from each request's ITL list.
   request_level_stats: [mean, p50, p95, p99]
-  # Then aggregate the per-request values across the selected group(s).
   percentiles: [50, 90, 95, 99]
   aggregates:
     - mean

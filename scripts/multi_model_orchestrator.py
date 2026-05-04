@@ -260,6 +260,7 @@ def main() -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     summary_path = REPORTS_DIR / "multi_model_run_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(f"Final report written to: {summary_path}")
 
     failed = [m for m in summary["models"] if "error" in m]
     print("\nRun complete")

@@ -1,0 +1,8 @@
+name: phi3_mini_4k_instruct
+engine: vllm
+model_id: microsoft/Phi-3-mini-4k-instruct
+backend_api: openai_compatible
+tensor_parallel_size: 1
+max_model_len: 4096
+gpu_memory_utilization: 0.85
+enforce_eager: true
