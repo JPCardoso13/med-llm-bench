@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -30,7 +31,34 @@ PER_DATASET_EVAL_LIMIT = 5
 RAW_RESULTS_DIR = Path("outputs/raw")
 REPORTS_DIR = Path("outputs/reports")
 TMP_RESULTS_DIR = Path("outputs/tmp")
-SERVE_LOG_DIR = Path("logs/vllm_serve")
+SERVE_LOG_DIR = Path("logs/vllm")
+
+
+def maybe_evict_hf_cache_between_models() -> None:
+    if os.getenv("HF_EVICT_BETWEEN_MODELS", "0") != "1":
+        return
+
+    hf_home_raw = os.getenv("HF_HOME")
+    if not hf_home_raw:
+        return
+
+    hf_home = Path(hf_home_raw)
+    if not hf_home.exists() or not hf_home.is_dir():
+        return
+
+    removed_entries = 0
+    for child in hf_home.iterdir():
+        try:
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+            removed_entries += 1
+        except Exception as exc:
+            print(f"  Warning: failed to remove cache entry {child}: {exc}")
+
+    hf_home.mkdir(parents=True, exist_ok=True)
+    print(f"  Cleared Hugging Face cache entries: {removed_entries}")
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -126,7 +154,7 @@ def build_formatter(task_cfg: dict[str, Any]):
 def discover_task_configs() -> list[Path]:
     """Discover all task configs from configs/tasks/*.yaml, sorted by name."""
     configs = list(TASKS_DIR.glob("*.yaml"))
-    configs = [c for c in configs if c.stem != "template"]  # exclude template
+    configs = [c for c in configs if c.stem != "template"]
     return sorted(configs)
 
 
@@ -196,11 +224,9 @@ def run_benchmark_for_model(
 
 
 def compute_and_save_metrics(model_name: str, raw_path: Path, task_id: str, systems_profile: dict[str, Any], cognitive_profile: dict[str, Any]) -> tuple[Path, Path | None]:
-    # load results
     with open(raw_path, "r", encoding="utf-8") as f:
         raw_data = json.load(f)
 
-    # Deserialize dicts back to BenchmarkResult objects
     all_results = [BenchmarkResult(**r) for r in raw_data]
 
     overall_summary = calculate_system_metrics(all_results, systems_profile)
@@ -267,8 +293,8 @@ def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: 
             summary["models"].append({"model_name": model_name, "error": str(exc)})
         finally:
             stop_vllm(handle)
-            # Give time for full cleanup between models to avoid process limit issues
             time.sleep(2)
+            maybe_evict_hf_cache_between_models()
 
     # Write task-specific summary
     task_report_dir = REPORTS_DIR / task_id

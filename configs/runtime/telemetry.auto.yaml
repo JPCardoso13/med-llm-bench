@@ -1,5 +1,5 @@
 telemetry:
-  enabled: false
+  enabled: true
   collector: remote_http
   timeout_s: 1.5
   window_path: /window

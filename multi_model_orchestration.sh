@@ -4,19 +4,43 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --time=02:00:00
-#SBATCH --partition=normal-a100-80
+#SBATCH --partition=normal-a100-40
 #SBATCH --account=F202500001HPCVLABEPICUREG
 #SBATCH --output=logs/deucalion/out/vllm_%j.out
 #SBATCH --error=logs/deucalion/err/vllm_%j.err
+
+# Suggested defaults:
+# - No internet, big storage: HF_OFFLINE=1 HF_CACHE_MODE=persistent HF_EVICT_BETWEEN_MODELS=0
+# - Internet, small storage: HF_OFFLINE=0 HF_CACHE_MODE=ephemeral HF_EVICT_BETWEEN_MODELS=1
 
 set -euo pipefail
 
 WORKDIR="/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-bench"
 cd "$WORKDIR"
 
-export HF_HOME="$WORKDIR/.cache/huggingface"
 export SIF="med-llm-bench.sif"
+
+HF_CACHE_MODE="${HF_CACHE_MODE:-persistent}"
+if [[ "$HF_CACHE_MODE" == "ephemeral" ]]; then
+    job_tmp_root="${SLURM_TMPDIR:-$WORKDIR/tmp/slurm_${SLURM_JOB_ID:-manual}}"
+    export HF_HOME="${HF_HOME:-$job_tmp_root/huggingface}"
+else
+    export HF_HOME="${HF_HOME:-$WORKDIR/.cache/huggingface}"
+fi
 mkdir -p "$HF_HOME"
+
+HF_OFFLINE="${HF_OFFLINE:-0}"
+if [[ "$HF_OFFLINE" == "1" ]]; then
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    export HF_DATASETS_OFFLINE=1
+else
+    export HF_HUB_OFFLINE=0
+    export TRANSFORMERS_OFFLINE=0
+    export HF_DATASETS_OFFLINE=0
+fi
+
+HF_EVICT_BETWEEN_MODELS="${HF_EVICT_BETWEEN_MODELS:-0}"
 
 SERVE_PORT="${SERVE_PORT:-8000}"
 RAY_PORT="${RAY_PORT:-6379}"
@@ -36,9 +60,20 @@ node_count=$(extract_first_int "${SLURM_NNODES:-${SLURM_JOB_NUM_NODES:-1}}")
 gpus_per_node=$(extract_first_int "${SLURM_GPUS_ON_NODE:-${SLURM_GPUS_PER_NODE:-1}}")
 
 declare -a RAY_PIDS=()
+declare -a TELEMETRY_PIDS=()
 
 cleanup() {
     rc=$?
+    if [[ "$HF_CACHE_MODE" == "ephemeral" ]]; then
+        echo "Cleaning ephemeral Hugging Face cache at $HF_HOME"
+        rm -rf "$HF_HOME" >/dev/null 2>&1 || true
+    fi
+    if [[ ${#TELEMETRY_PIDS[@]} -gt 0 ]]; then
+        echo "Stopping telemetry processes..."
+        for pid in "${TELEMETRY_PIDS[@]}"; do
+            kill "$pid" >/dev/null 2>&1 || true
+        done
+    fi
     if [[ ${#RAY_PIDS[@]} -gt 0 ]]; then
         echo "Stopping Ray processes..."
         for pid in "${RAY_PIDS[@]}"; do
@@ -50,18 +85,15 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p configs/runtime
-cat > configs/runtime/telemetry.auto.yaml <<EOF
-telemetry:
-  enabled: false
-  collector: remote_http
-  timeout_s: 1.5
-  window_path: /window
-  endpoints: []
-EOF
 
 export SINGULARITYENV_PYTORCH_ALLOC_CONF="expandable_segments:True"
 export SINGULARITYENV_HF_HOME="$HF_HOME"
 export SINGULARITYENV_HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
+export SINGULARITYENV_HF_HUB_OFFLINE="$HF_HUB_OFFLINE"
+export SINGULARITYENV_TRANSFORMERS_OFFLINE="$TRANSFORMERS_OFFLINE"
+export SINGULARITYENV_HF_DATASETS_OFFLINE="$HF_DATASETS_OFFLINE"
+export SINGULARITYENV_HF_OFFLINE="$HF_OFFLINE"
+export SINGULARITYENV_HF_EVICT_BETWEEN_MODELS="$HF_EVICT_BETWEEN_MODELS"
 export SINGULARITYENV_PYTHONPATH="$WORKDIR${PYTHONPATH:+:$PYTHONPATH}"
 export SINGULARITYENV_LLM_API_KEY="${LLM_API_KEY:-EMPTY}"
 export SINGULARITYENV_LLM_BENCH_RUNTIME_CONFIG="configs/runtime/telemetry.auto.yaml"
@@ -103,14 +135,31 @@ export SINGULARITYENV_RAY_ADDRESS="$RAY_ADDRESS"
 
 # Start telemetry agents on all nodes (head + workers)
 telemetry_port=9101
+declare -a TELEMETRY_ENDPOINTS=()
 for node in "${nodes_array[@]}"; do
     node_ip=$(srun --nodes=1 --ntasks=1 -w "$node" hostname --ip-address | awk '{print $1}')
+    TELEMETRY_ENDPOINTS+=("http://${node_ip}:${telemetry_port}")
     srun --overlap --nodes=1 --ntasks=1 -w "$node" \
         singularity exec --nv --env-file .env $SIF \
         python3 scripts/telemetry/nvidia_smi_agent.py --host 0.0.0.0 --port $telemetry_port --poll-interval-s 0.2 &
+    TELEMETRY_PIDS+=("$!")
     sleep 2
-    configs/runtime/telemetry.auto.yaml >/dev/null 2>&1 || true
 done
+
+{
+    echo "telemetry:"
+    echo "  enabled: true"
+    echo "  collector: remote_http"
+    echo "  timeout_s: 1.5"
+    echo "  window_path: /window"
+    echo "  endpoints:"
+    for endpoint in "${TELEMETRY_ENDPOINTS[@]}"; do
+        echo "    - ${endpoint}"
+    done
+} > configs/runtime/telemetry.auto.yaml
+
+echo "Telemetry endpoints configured: ${#TELEMETRY_ENDPOINTS[@]} node(s)"
+echo "Cache mode: ${HF_CACHE_MODE} | HF_HOME=${HF_HOME} | Offline=${HF_OFFLINE}"
 
 python_script="scripts/multi_model_orchestrator.py"
 echo "Running orchestrator: $python_script"
