@@ -2,7 +2,7 @@ name: llama3_8b_instruct
 engine: vllm
 model_id: meta-llama/Meta-Llama-3-8B-Instruct
 backend_api: openai_compatible
-tensor_parallel_size: 2
+tensor_parallel_size: 1
 max_model_len: 4096
 gpu_memory_utilization: 0.90
 enforce_eager: false

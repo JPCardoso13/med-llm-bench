@@ -107,6 +107,7 @@ def build_telemetry_collector(runtime_config: dict[str, Any]):
             endpoints=endpoints,
             window_path=telemetry_cfg.get("window_path", "/window"),
             timeout_s=telemetry_cfg.get("timeout_s", 1.5),
+            window_padding_s=telemetry_cfg.get("window_padding_s", 0.5),
         )
 
     raise ValueError(f"Unsupported telemetry collector: {collector_name}")
@@ -175,7 +176,7 @@ def run_benchmark_for_model(
 
     num_fewshot = int(task_cfg.get("execution", {}).get("num_fewshot", 0))
     flush_every = int(task_cfg.get("execution", {}).get("flush_every", 10))
-    task_name = task_cfg.get("task_id", "task"
+    task_name = task_cfg.get("task_id", "task")
 
     all_results = []
     datasets_cfg = task_cfg.get("datasets", [])
@@ -212,7 +213,7 @@ def run_benchmark_for_model(
 
         results = runner.run(eval_samples)
         all_results.extend(results)
-        print(f"  Dataset {dataset_name}: {len(results)} results")
+        print(f"  Dataset {dataset_name}: {len(results)}/{len(eval_samples)} results")
 
     RAW_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_RESULTS_DIR / task_id / f"{model_name}.json"
@@ -285,6 +286,9 @@ def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: 
             raw_path = run_benchmark_for_model(model_cfg, model_name, task_cfg, runtime_cfg, handle.base_url, task_id)
 
             systems_path, cognitive_path = compute_and_save_metrics(model_name, raw_path, task_id, systems_profile, cognitive_profile)
+            print(f"  Systems summary: {systems_path}")
+            if cognitive_path:
+                print(f"  Cognitive summary: {cognitive_path}")
 
             summary["models"].append({
                 "model_name": model_name,

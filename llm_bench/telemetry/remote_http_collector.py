@@ -16,6 +16,7 @@ class RemoteHttpTelemetryCollector(TelemetryCollector):
         endpoints: List[str],
         window_path: str = "/window",
         timeout_s: float = 1.5,
+        window_padding_s: float = 0.5,
     ):
         if not endpoints:
             raise ValueError("RemoteHttpTelemetryCollector requires at least one endpoint.")
@@ -23,6 +24,7 @@ class RemoteHttpTelemetryCollector(TelemetryCollector):
         self._endpoints = endpoints
         self._window_path = window_path
         self._timeout_s = timeout_s
+        self._window_padding_s = window_padding_s
 
     def start_run(self, run_context: Dict[str, Any]) -> None:
         return
@@ -58,10 +60,12 @@ class RemoteHttpTelemetryCollector(TelemetryCollector):
         end_epoch_s: float,
     ) -> Dict[str, Any]:
         base = endpoint.rstrip("/")
+        padded_start_epoch_s = max(0.0, start_epoch_s - self._window_padding_s)
+        padded_end_epoch_s = end_epoch_s + self._window_padding_s
         query = parse.urlencode(
             {
-                "start_epoch_s": f"{start_epoch_s:.6f}",
-                "end_epoch_s": f"{end_epoch_s:.6f}",
+                "start_epoch_s": f"{padded_start_epoch_s:.6f}",
+                "end_epoch_s": f"{padded_end_epoch_s:.6f}",
             }
         )
         url = f"{base}{self._window_path}?{query}"

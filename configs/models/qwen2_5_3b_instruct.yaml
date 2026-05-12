@@ -2,7 +2,7 @@ name: qwen2_5_3b_instruct
 engine: vllm
 model_id: Qwen/Qwen2.5-3B-Instruct
 backend_api: openai_compatible
-tensor_parallel_size: 2
+tensor_parallel_size: 1
 max_model_len: 4096
 gpu_memory_utilization: 0.85
 enforce_eager: false

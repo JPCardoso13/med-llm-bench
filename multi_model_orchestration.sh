@@ -1,11 +1,13 @@
 #!/bin/bash
-#SBATCH --nodes=2
-#SBATCH --exclude=aurora[04-05]
+#SBATCH --nodes=1
+#SBATCH --gpus=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=32
 #SBATCH --time=02:00:00
-#SBATCH --partition=rtx4060
-#SBATCH --account=haslab
-#SBATCH --output=logs/slurm/out/vllm_%j.out
-#SBATCH --error=logs/slurm/err/vllm_%j.err
+#SBATCH --partition=normal-a100-40
+#SBATCH --account=F202500001HPCVLABEPICUREG
+#SBATCH --output=logs/orchestration/out/multi_model_orchestration_%j.out
+#SBATCH --error=logs/orchestration/err/multi_model_orchestration_%j.err
 
 # Suggested defaults:
 # - No internet, big storage: HF_OFFLINE=1 HF_CACHE_MODE=persistent HF_EVICT_BETWEEN_MODELS=0
@@ -13,7 +15,7 @@
 
 set -euo pipefail
 
-WORKDIR="/projects/jcardoso/med-llm-bench"
+WORKDIR="/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-bench"
 cd "$WORKDIR"
 
 export SIF="med-llm-bench.sif"
@@ -98,7 +100,7 @@ export SINGULARITYENV_LLM_BENCH_RUNTIME_CONFIG="configs/runtime/telemetry.auto.y
 export SINGULARITYENV_LLM_MAX_TOKENS_DEFAULT="1024"
 export SINGULARITYENV_SERVE_PORT="$SERVE_PORT"
 
-mkdir -p logs/multi_model logs/vllm_serve outputs/reports outputs/raw
+mkdir -p logs/orchestration/out logs/orchestration/err logs/vllm outputs/reports outputs/raw
 
 echo "Job $SLURM_JOB_ID on node $(hostname), nodes=${node_count}, gpus_per_node=${gpus_per_node}"
 
