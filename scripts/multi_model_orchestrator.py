@@ -112,13 +112,11 @@ def build_telemetry_collector(runtime_config: dict[str, Any]):
     raise ValueError(f"Unsupported telemetry collector: {collector_name}")
 
 
-def build_backend(model_cfg: dict[str, Any], base_url: str) -> OpenAIBackend:
+def build_backend(model_cfg: dict[str, Any], base_url: str, max_tokens: int = 1024) -> OpenAIBackend:
     model_id = str(model_cfg["model_id"])
 
     api_key = os.getenv("LLM_API_KEY", "EMPTY")
     temperature = float(model_cfg.get("temperature", 0.0))
-    default_max_tokens = int(os.getenv("LLM_MAX_TOKENS_DEFAULT", "1024"))
-    max_tokens = int(model_cfg.get("max_tokens", default_max_tokens))
 
     return OpenAIBackend(
         model_id=model_id,
@@ -170,13 +168,14 @@ def run_benchmark_for_model(
     base_url: str,
     task_id: str,
 ) -> Path:
-    backend = build_backend(model_cfg, base_url)
+    max_tokens = int(task_cfg.get("execution", {}).get("max_tokens", 1024))
+    backend = build_backend(model_cfg, base_url, max_tokens=max_tokens)
     formatter = build_formatter(task_cfg)
     telemetry_collector = build_telemetry_collector(runtime_cfg)
 
     num_fewshot = int(task_cfg.get("execution", {}).get("num_fewshot", 0))
     flush_every = int(task_cfg.get("execution", {}).get("flush_every", 10))
-    task_name = task_cfg.get("task_id", "task")
+    task_name = task_cfg.get("task_id", "task"
 
     all_results = []
     datasets_cfg = task_cfg.get("datasets", [])
@@ -273,7 +272,13 @@ def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: 
         print(f"\n== Model: {model_name} ==")
         handle = None
         try:
-            handle = start_vllm(model_cfg=model_cfg, port=serve_port, logs_dir=SERVE_LOG_DIR, timeout_s=startup_timeout_s)
+            model_startup_timeout_s = int(model_cfg.get("startup_timeout_s", startup_timeout_s))
+            handle = start_vllm(
+                model_cfg=model_cfg,
+                port=serve_port,
+                logs_dir=SERVE_LOG_DIR,
+                timeout_s=model_startup_timeout_s,
+            )
             print(f"  Serving at {handle.base_url} (mode={handle.mode})")
 
             os.environ["LLM_BASE_URL"] = handle.base_url
@@ -293,7 +298,7 @@ def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: 
             summary["models"].append({"model_name": model_name, "error": str(exc)})
         finally:
             stop_vllm(handle)
-            time.sleep(2)
+            time.sleep(8)
             maybe_evict_hf_cache_between_models()
 
     # Write task-specific summary
@@ -320,7 +325,7 @@ def main() -> None:
         return
 
     serve_port = int(os.getenv("SERVE_PORT", "8000"))
-    startup_timeout_s = int(os.getenv("VLLM_STARTUP_TIMEOUT_S", "360"))
+    startup_timeout_s = int(os.getenv("VLLM_STARTUP_TIMEOUT_S", "1800"))
 
     all_summaries = {"tasks": []}
 

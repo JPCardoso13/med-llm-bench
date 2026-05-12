@@ -25,6 +25,7 @@ datasets:
 execution:
   num_fewshot: 3
   flush_every: 10
+  max_tokens: 1024
 
 runtime:
   telemetry_config: configs/runtime/telemetry.auto.yaml

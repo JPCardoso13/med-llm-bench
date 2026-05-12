@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import time
 import urllib.request
@@ -15,6 +16,40 @@ class VLLMHandle:
     base_url: str
     mode: str
     log_path: Path
+
+
+def _terminate_process_tree(process: subprocess.Popen[Any], timeout_s: int = 20) -> None:
+    if process.poll() is not None:
+        return
+
+    try:
+        pgid = os.getpgid(process.pid)
+        os.killpg(pgid, signal.SIGTERM)
+        process.wait(timeout=timeout_s)
+        return
+    except Exception:
+        pass
+
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+        return
+    except Exception:
+        pass
+
+    try:
+        pgid = os.getpgid(process.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            return
+
+    try:
+        process.wait(timeout=5)
+    except Exception:
+        pass
 
 
 def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[str]:
@@ -66,7 +101,7 @@ def _wait_for_ready(base_url: str, process: subprocess.Popen[Any], timeout_s: in
     return False
 
 
-def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path = "logs/vllm_serve", timeout_s: int = 240) -> VLLMHandle:
+def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path = "logs/vllm", timeout_s: int = 240) -> VLLMHandle:
     logs_dir = Path(logs_dir)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -79,16 +114,19 @@ def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path
     log_path = logs_dir / f"vllm_{model_cfg.get('name','model')}_{mode}.log"
 
     with open(log_path, "w", encoding="utf-8") as lf:
-        process = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, env=os.environ.copy())
+        process = subprocess.Popen(
+            cmd,
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            env=os.environ.copy(),
+            start_new_session=True,
+        )
 
     host = os.getenv("SINGULARITYENV_VLLM_HOST_IP") or os.getenv("VLLM_HOST_IP") or "127.0.0.1"
     base_url = f"http://{host}:{port}/v1"
 
     if not _wait_for_ready(base_url, process, timeout_s):
-        try:
-            process.terminate()
-        except Exception:
-            pass
+        _terminate_process_tree(process)
         raise RuntimeError(f"vLLM failed to become ready, see {log_path}")
 
     return VLLMHandle(process=process, base_url=base_url, mode=mode, log_path=log_path)
@@ -100,9 +138,4 @@ def stop_vllm(handle: VLLMHandle | None) -> None:
     proc = handle.process
     if proc.poll() is not None:
         return
-    proc.terminate()
-    try:
-        proc.wait(timeout=20)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    _terminate_process_tree(proc)

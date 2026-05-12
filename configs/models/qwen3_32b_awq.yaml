@@ -2,7 +2,8 @@ name: qwen3_32b_awq
 engine: vllm
 model_id: Qwen/Qwen3-32B-AWQ
 backend_api: openai_compatible
-tensor_parallel_size: 1
+tensor_parallel_size: 2
 max_model_len: 4096
 gpu_memory_utilization: 0.80
-enforce_eager: true
+enforce_eager: false
+startup_timeout_s: 3000

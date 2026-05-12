@@ -1,8 +1,9 @@
 import time
+import re
 from datetime import datetime
 from typing import Any, List, Dict, Optional
 
-from openai import OpenAI
+from openai import OpenAI, BadRequestError
 from llm_bench.schemas import BenchmarkResult
 from .base_backend import BaseBackend
 
@@ -37,6 +38,30 @@ class OpenAIBackend(BaseBackend):
     def model_id(self) -> str:
         return self._model_id
 
+    def _max_tokens_from_error(self, error_message: str) -> Optional[int]:
+        # Example message fragment: "(1024 > 4096 - 3510)"
+        match = re.search(r"\((\d+)\s*>\s*(\d+)\s*-\s*(\d+)\)", error_message)
+        if not match:
+            return None
+
+        context_window = int(match.group(2))
+        prompt_tokens = int(match.group(3))
+        available = context_window - prompt_tokens
+        # Keep a small margin for safety and tokenizer variation.
+        adjusted = max(1, available - 16)
+        return adjusted
+
+    def _create_stream(self, messages: List[Dict[str, str]], max_tokens: int):
+        return self._client.chat.completions.create(
+            model=self._model_id,
+            messages=messages,
+            temperature=self._temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+            **self._extra_params,
+        )
+
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -60,15 +85,20 @@ class OpenAIBackend(BaseBackend):
 
         request_start = time.perf_counter()
 
-        stream = self._client.chat.completions.create(
-            model=self._model_id,
-            messages=messages,
-            temperature=self._temperature,
-            max_tokens=self._max_tokens,
-            stream=True,
-            stream_options={"include_usage": True},
-            **self._extra_params,
-        )
+        chosen_max_tokens = self._max_tokens
+        try:
+            stream = self._create_stream(messages, chosen_max_tokens)
+        except BadRequestError as exc:
+            error_text = str(exc)
+            if "max_tokens" not in error_text and "max_completion_tokens" not in error_text:
+                raise
+
+            adjusted = self._max_tokens_from_error(error_text)
+            if adjusted is None or adjusted >= chosen_max_tokens:
+                raise
+
+            chosen_max_tokens = adjusted
+            stream = self._create_stream(messages, chosen_max_tokens)
 
         for chunk in stream:
             now = time.perf_counter()

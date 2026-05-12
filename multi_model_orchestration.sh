@@ -1,13 +1,11 @@
 #!/bin/bash
-#SBATCH --nodes=1
-#SBATCH --gpus=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --nodes=2
+#SBATCH --exclude=aurora[04-05]
 #SBATCH --time=02:00:00
-#SBATCH --partition=normal-a100-40
-#SBATCH --account=F202500001HPCVLABEPICUREG
-#SBATCH --output=logs/deucalion/out/vllm_%j.out
-#SBATCH --error=logs/deucalion/err/vllm_%j.err
+#SBATCH --partition=rtx4060
+#SBATCH --account=haslab
+#SBATCH --output=logs/slurm/out/vllm_%j.out
+#SBATCH --error=logs/slurm/err/vllm_%j.err
 
 # Suggested defaults:
 # - No internet, big storage: HF_OFFLINE=1 HF_CACHE_MODE=persistent HF_EVICT_BETWEEN_MODELS=0
@@ -15,7 +13,7 @@
 
 set -euo pipefail
 
-WORKDIR="/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-bench"
+WORKDIR="/projects/jcardoso/med-llm-bench"
 cd "$WORKDIR"
 
 export SIF="med-llm-bench.sif"
@@ -23,7 +21,7 @@ export SIF="med-llm-bench.sif"
 HF_CACHE_MODE="${HF_CACHE_MODE:-persistent}"
 if [[ "$HF_CACHE_MODE" == "ephemeral" ]]; then
     job_tmp_root="${SLURM_TMPDIR:-$WORKDIR/tmp/slurm_${SLURM_JOB_ID:-manual}}"
-    export HF_HOME="${HF_HOME:-$job_tmp_root/huggingface}"
+    export HF_HOME="$job_tmp_root/huggingface"
 else
     export HF_HOME="${HF_HOME:-$WORKDIR/.cache/huggingface}"
 fi
@@ -114,6 +112,7 @@ export SINGULARITYENV_LLM_BASE_URL="http://${head_node_ip}:${SERVE_PORT}/v1"
 
 # Start Ray head
 srun --overlap --nodes=1 --ntasks=1 -w "$head_node" \
+    env SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 SINGULARITYENV_VLLM_HOST_IP="$head_node_ip" \
     singularity exec --nv --env-file .env $SIF \
     ray start --head --node-ip-address="$head_node_ip" --port="$RAY_PORT" --num-gpus="$gpus_per_node" --block &
 RAY_PIDS+=("$!")
@@ -124,6 +123,7 @@ for ((i=1; i<${#nodes_array[@]}; i++)); do
     worker_ip=$(srun --nodes=1 --ntasks=1 -w "$worker_node" hostname --ip-address | awk '{print $1}')
 
     srun --overlap --nodes=1 --ntasks=1 -w "$worker_node" \
+        env SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 SINGULARITYENV_VLLM_HOST_IP="$worker_ip" \
         singularity exec --nv --env-file .env $SIF \
         ray start --address="${head_node_ip}:${RAY_PORT}" --node-ip-address="$worker_ip" --num-gpus="$gpus_per_node" --block &
     RAY_PIDS+=("$!")
