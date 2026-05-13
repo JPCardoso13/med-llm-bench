@@ -81,6 +81,8 @@ def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[
 
     if distributed:
         cmd.extend(["--distributed-executor-backend", "ray"])
+    elif tp > 1:
+        cmd.extend(["--distributed-executor-backend", "mp"])
 
     return cmd
 
@@ -106,9 +108,10 @@ def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     ray_addr = os.getenv("RAY_ADDRESS") or os.getenv("SINGULARITYENV_RAY_ADDRESS")
+    node_count = int(os.getenv("LLM_NODE_COUNT") or os.getenv("SINGULARITYENV_LLM_NODE_COUNT") or "1")
     tp = int(model_cfg.get("tensor_parallel_size", 1))
-    distributed = bool(ray_addr) and tp > 1
-    mode = "distributed" if distributed else "single"
+    distributed = bool(ray_addr) and node_count > 1 and tp > 1
+    mode = "distributed" if distributed else ("multi_gpu" if tp > 1 else "single")
 
     cmd = _build_cmd(model_cfg, port, distributed)
     log_path = logs_dir / f"vllm_{model_cfg.get('name','model')}_{mode}.log"

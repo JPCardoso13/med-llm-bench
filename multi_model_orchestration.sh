@@ -58,6 +58,10 @@ extract_first_int() {
 
 node_count=$(extract_first_int "${SLURM_NNODES:-${SLURM_JOB_NUM_NODES:-1}}")
 gpus_per_node=$(extract_first_int "${SLURM_GPUS_ON_NODE:-${SLURM_GPUS_PER_NODE:-1}}")
+multi_node=0
+if [[ "$node_count" -gt 1 ]]; then
+    multi_node=1
+fi
 
 declare -a RAY_PIDS=()
 declare -a TELEMETRY_PIDS=()
@@ -98,42 +102,47 @@ export SINGULARITYENV_PYTHONPATH="$WORKDIR${PYTHONPATH:+:$PYTHONPATH}"
 export SINGULARITYENV_LLM_API_KEY="${LLM_API_KEY:-EMPTY}"
 export SINGULARITYENV_LLM_BENCH_RUNTIME_CONFIG="configs/runtime/telemetry.auto.yaml"
 export SINGULARITYENV_LLM_MAX_TOKENS_DEFAULT="1024"
+export SINGULARITYENV_LLM_NODE_COUNT="$node_count"
 export SINGULARITYENV_SERVE_PORT="$SERVE_PORT"
 
 mkdir -p logs/orchestration/out logs/orchestration/err logs/vllm outputs/reports outputs/raw
 
 echo "Job $SLURM_JOB_ID on node $(hostname), nodes=${node_count}, gpus_per_node=${gpus_per_node}"
 
-echo "Bootstrapping Ray cluster on allocated nodes..."
-mapfile -t nodes_array < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
-head_node="${nodes_array[0]}"
-head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address | awk '{print $1}')
+if [[ "$multi_node" -eq 1 ]]; then
+    echo "Bootstrapping Ray cluster on allocated nodes..."
+    mapfile -t nodes_array < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
+    head_node="${nodes_array[0]}"
+    head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address | awk '{print $1}')
 
-export SINGULARITYENV_VLLM_HOST_IP="$head_node_ip"
-export SINGULARITYENV_LLM_BASE_URL="http://${head_node_ip}:${SERVE_PORT}/v1"
+    export SINGULARITYENV_VLLM_HOST_IP="$head_node_ip"
+    export SINGULARITYENV_LLM_BASE_URL="http://${head_node_ip}:${SERVE_PORT}/v1"
 
-# Start Ray head
-srun --overlap --nodes=1 --ntasks=1 -w "$head_node" \
-    env SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 SINGULARITYENV_VLLM_HOST_IP="$head_node_ip" \
-    singularity exec --nv --env-file .env $SIF \
-    ray start --head --node-ip-address="$head_node_ip" --port="$RAY_PORT" --num-gpus="$gpus_per_node" --block &
-RAY_PIDS+=("$!")
-sleep 8
-
-for ((i=1; i<${#nodes_array[@]}; i++)); do
-    worker_node="${nodes_array[$i]}"
-    worker_ip=$(srun --nodes=1 --ntasks=1 -w "$worker_node" hostname --ip-address | awk '{print $1}')
-
-    srun --overlap --nodes=1 --ntasks=1 -w "$worker_node" \
-        env SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 SINGULARITYENV_VLLM_HOST_IP="$worker_ip" \
+    # Start Ray head
+    srun --overlap --nodes=1 --ntasks=1 -w "$head_node" \
+        env SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 SINGULARITYENV_VLLM_HOST_IP="$head_node_ip" \
         singularity exec --nv --env-file .env $SIF \
-        ray start --address="${head_node_ip}:${RAY_PORT}" --node-ip-address="$worker_ip" --num-gpus="$gpus_per_node" --block &
+        ray start --head --node-ip-address="$head_node_ip" --port="$RAY_PORT" --num-gpus="$gpus_per_node" --block &
     RAY_PIDS+=("$!")
-    sleep 5
-done
+    sleep 8
 
-export RAY_ADDRESS="${head_node_ip}:${RAY_PORT}"
-export SINGULARITYENV_RAY_ADDRESS="$RAY_ADDRESS"
+    for ((i=1; i<${#nodes_array[@]}; i++)); do
+        worker_node="${nodes_array[$i]}"
+        worker_ip=$(srun --nodes=1 --ntasks=1 -w "$worker_node" hostname --ip-address | awk '{print $1}')
+
+        srun --overlap --nodes=1 --ntasks=1 -w "$worker_node" \
+            env SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 SINGULARITYENV_VLLM_HOST_IP="$worker_ip" \
+            singularity exec --nv --env-file .env $SIF \
+            ray start --address="${head_node_ip}:${RAY_PORT}" --node-ip-address="$worker_ip" --num-gpus="$gpus_per_node" --block &
+        RAY_PIDS+=("$!")
+        sleep 5
+    done
+
+    export RAY_ADDRESS="${head_node_ip}:${RAY_PORT}"
+    export SINGULARITYENV_RAY_ADDRESS="$RAY_ADDRESS"
+else
+    echo "Single-node allocation detected; skipping Ray bootstrap."
+fi
 
 # Start telemetry agents on all nodes (head + workers)
 telemetry_port=9101
