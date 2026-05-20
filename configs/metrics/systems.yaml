@@ -4,11 +4,6 @@ scope: systems
 
 enabled: true
 
-group_by:
-  - task_name
-  - dataset
-  - model_id
-  - backend
 
 latency:
   enabled: true

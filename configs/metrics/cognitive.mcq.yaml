@@ -3,11 +3,6 @@ schema_version: 1
 profile_id: cognitive.mcq
 scope: cognitive
 task_type: mcq
-group_by:
-  - task_name
-  - dataset
-  - model_id
-  - backend
 
 enabled: true
 

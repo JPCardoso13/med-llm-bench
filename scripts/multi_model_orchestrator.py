@@ -181,6 +181,7 @@ def run_benchmark_for_model(
     all_results = []
     datasets_cfg = task_cfg.get("datasets", [])
     enabled_datasets = [d for d in datasets_cfg if d.get("enabled", True)]
+    grouped_results: dict[str, list[dict]] = {}
 
     for ds in enabled_datasets:
         dataset_name = ds["name"]
@@ -212,13 +213,16 @@ def run_benchmark_for_model(
         )
 
         results = runner.run(eval_samples)
+        # store per-dataset results in tmp (already written by runner)
+        grouped_results[dataset_name] = [r.model_dump(mode="json") for r in results]
         all_results.extend(results)
         print(f"  Dataset {dataset_name}: {len(results)}/{len(eval_samples)} results")
 
     RAW_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_RESULTS_DIR / task_id / f"{model_name}.json"
     raw_path.parent.mkdir(parents=True, exist_ok=True)
-    save_results_json(all_results, raw_path)
+    # Write grouped-by-dataset raw results (backwards-compatible: previously a flat list)
+    raw_path.write_text(json.dumps(grouped_results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  Raw results: {raw_path}")
     return raw_path
 
@@ -227,19 +231,52 @@ def compute_and_save_metrics(model_name: str, raw_path: Path, task_id: str, syst
     with open(raw_path, "r", encoding="utf-8") as f:
         raw_data = json.load(f)
 
-    all_results = [BenchmarkResult(**r) for r in raw_data]
+    # Expect grouped-by-dataset raw format: a dict mapping dataset -> list[results]
+    if not isinstance(raw_data, dict):
+        raise ValueError(f"Expected grouped raw results (dict) in {raw_path}, got {type(raw_data)}")
+
+    flattened: list[dict] = []
+    for ds_name, items in raw_data.items():
+        if isinstance(items, list):
+            flattened.extend(items)
+
+    all_results = [BenchmarkResult(**r) for r in flattened]
+
+    # extract backend metadata (assumes consistent backend per run)
+    backend_meta = None
+    if all_results:
+        backend_meta = getattr(all_results[0], "backend", None)
 
     overall_summary = calculate_system_metrics(all_results, systems_profile)
-    task_report_dir = REPORTS_DIR / task_id / "model_summaries"
-    task_report_dir.mkdir(parents=True, exist_ok=True)
-    
-    systems_summary_path = task_report_dir / f"{model_name}_systems_summary.json"
+
+    # Remove profile-level group_by (we don't want this controlling filesystem layout)
+    overall_summary.pop("group_by", None)
+    if backend_meta is not None:
+        overall_summary["backend"] = backend_meta
+
+    # Remove backend from each group's group_key so backend is only top-level metadata
+    for g in overall_summary.get("groups", []):
+        if isinstance(g.get("group_key"), dict):
+            g["group_key"].pop("backend", None)
+
+    # Write summaries into per-model directory under task
+    task_model_dir = REPORTS_DIR / task_id / model_name
+    task_model_dir.mkdir(parents=True, exist_ok=True)
+
+    systems_summary_path = task_model_dir / "systems_summary.json"
     systems_summary_path.write_text(json.dumps(overall_summary, indent=2), encoding="utf-8")
 
     cognitive_summary_path = None
     if cognitive_profile.get("enabled", True):
         cognitive_overall_summary = calculate_cognitive_metrics(all_results, cognitive_profile)
-        cognitive_summary_path = task_report_dir / f"{model_name}_cognitive_summary.json"
+        cognitive_overall_summary.pop("group_by", None)
+        if backend_meta is not None:
+            cognitive_overall_summary["backend"] = backend_meta
+        for g in cognitive_overall_summary.get("groups", []):
+            if isinstance(g.get("group_key"), dict):
+                g["group_key"].pop("backend", None)
+
+        cognitive_summary_path = task_model_dir / "cognitive_summary.json"
         cognitive_summary_path.write_text(json.dumps(cognitive_overall_summary, indent=2), encoding="utf-8")
 
     return systems_summary_path, cognitive_summary_path

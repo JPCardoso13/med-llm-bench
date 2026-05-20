@@ -115,25 +115,18 @@ def build_formatter(task_cfg: dict[str, Any]):
     raise ValueError(f"Unsupported task_type: {task_type}")
 
 
-def resolve_raw_output_path(task_cfg: dict[str, Any], dataset_name: str) -> Path:
-    outputs_cfg = task_cfg.get("outputs", {})
-    raw_dir = Path(outputs_cfg.get("raw_dir", "outputs"))
-    pattern = outputs_cfg.get("raw_file_pattern", "{dataset}_test.json")
-    return raw_dir / pattern.format(dataset=dataset_name)
+def resolve_raw_output_path(task_id: str, model_name: str, dataset_name: str) -> Path:
+    return Path("outputs") / "tmp" / task_id / model_name / f"{dataset_name}.json"
 
 
-def resolve_systems_summary_json_path(task_cfg: dict[str, Any]) -> Path:
-    outputs_cfg = task_cfg.get("outputs", {})
+def resolve_systems_summary_json_path(task_cfg: dict[str, Any], model_name: str) -> Path:
     task_id = task_cfg.get("task_id", "task")
-    template = outputs_cfg.get("systems_summary_json", "outputs/reports/{task_id}_systems_summary.json")
-    return Path(template.format(task_id=task_id))
+    return Path("outputs") / "reports" / task_id / model_name / "systems_summary.json"
 
 
-def resolve_cognitive_summary_json_path(task_cfg: dict[str, Any]) -> Path:
-    outputs_cfg = task_cfg.get("outputs", {})
+def resolve_cognitive_summary_json_path(task_cfg: dict[str, Any], model_name: str) -> Path:
     task_id = task_cfg.get("task_id", "task")
-    template = outputs_cfg.get("cognitive_summary_json", "outputs/reports/{task_id}_cognitive_summary.json")
-    return Path(template.format(task_id=task_id))
+    return Path("outputs") / "reports" / task_id / model_name / "cognitive_summary.json"
 
 
 def main() -> None:
@@ -179,7 +172,7 @@ def main() -> None:
         eval_samples = data.get("eval", [])[:int(eval_limit)]
         fewshot_samples = data.get("fewshot", [])
 
-        output_path = resolve_raw_output_path(task_cfg, dataset_name)
+        output_path = resolve_raw_output_path(task_name, str(model_cfg.get("model_id")), dataset_name)
 
         runner = SequentialRunner(
             backend=backend,
@@ -207,14 +200,32 @@ def main() -> None:
             )
 
     overall_summary = calculate_system_metrics(all_results, systems_profile)
-    summary_path = resolve_systems_summary_json_path(task_cfg)
+
+    # add backend metadata and remove group_by from summary; remove backend from each group_key
+    backend_meta = getattr(backend, "model_id", None)
+    overall_summary.pop("group_by", None)
+    if backend_meta is not None:
+        overall_summary["backend"] = backend_meta
+    for g in overall_summary.get("groups", []):
+        if isinstance(g.get("group_key"), dict):
+            g["group_key"].pop("backend", None)
+
+    model_name = str(model_cfg.get("model_id"))
+    summary_path = resolve_systems_summary_json_path(task_cfg, model_name)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(overall_summary, indent=2), encoding="utf-8")
 
     cognitive_summary_path = None
     if cognitive_profile.get("enabled", True):
         cognitive_overall_summary = calculate_cognitive_metrics(all_results, cognitive_profile)
-        cognitive_summary_path = resolve_cognitive_summary_json_path(task_cfg)
+        cognitive_overall_summary.pop("group_by", None)
+        if backend_meta is not None:
+            cognitive_overall_summary["backend"] = backend_meta
+        for g in cognitive_overall_summary.get("groups", []):
+            if isinstance(g.get("group_key"), dict):
+                g["group_key"].pop("backend", None)
+
+        cognitive_summary_path = resolve_cognitive_summary_json_path(task_cfg, model_name)
         cognitive_summary_path.parent.mkdir(parents=True, exist_ok=True)
         cognitive_summary_path.write_text(json.dumps(cognitive_overall_summary, indent=2), encoding="utf-8")
 

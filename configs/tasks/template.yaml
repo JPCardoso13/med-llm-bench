@@ -40,12 +40,3 @@ metrics:
   # Cognitive metrics profile for evaluation (accuracy, parsing, etc).
   cognitive_profile: configs/metrics/cognitive.template.yaml
 
-outputs:
-  # Raw per-sample records from benchmark runner.
-  raw_dir: outputs/
-  raw_file_pattern: "{dataset}_test.json"
-
-  # Aggregated systems metrics outputs from calculation module.
-  systems_summary_json: outputs/reports/{task_id}_systems_summary.json
-  systems_summary_csv: outputs/reports/{task_id}_systems_summary.csv
-  cognitive_summary_json: outputs/reports/{task_id}_cognitive_summary.json
