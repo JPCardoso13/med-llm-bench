@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from itertools import product
 from typing import Any, Iterable, Mapping
 
 from llm_bench.metrics.answer_extraction import extract_mcq_answer_letter
@@ -16,27 +15,22 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
             "scope": profile.get("scope", "cognitive"),
             "enabled": False,
             "sample_count": len(results),
-            "group_by": list(profile.get("group_by", ["task_name", "dataset", "model_id", "backend"])),
             "groups": [],
         }
 
-    group_fields = list(profile.get("group_by", ["task_name", "dataset", "model_id", "backend"]))
-
-    groups: dict[tuple[Any, ...], list[BenchmarkResult]] = defaultdict(list)
+    groups: dict[str, list[BenchmarkResult]] = defaultdict(list)
     for result in results:
-        for group_key in _build_group_keys(result, group_fields):
-            groups[group_key].append(result)
+        groups[result.dataset].append(result)
 
     parse_failures: list[dict[str, Any]] = []
     ambiguous_extractions: list[dict[str, Any]] = []
     missing_ref_fields: list[dict[str, Any]] = []
 
     group_summaries = []
-    for group_key, group_results in groups.items():
+    for dataset, group_results in groups.items():
         group_summaries.append(
             _summarize_group(
-                group_key=group_key,
-                group_fields=group_fields,
+                dataset=dataset,
                 results=group_results,
                 profile=profile,
                 parse_failures=parse_failures,
@@ -66,15 +60,13 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
         "task_type": profile.get("task_type", "mcq"),
         "enabled": True,
         "sample_count": len(results),
-        "group_by": group_fields,
         "groups": group_summaries,
         "quality": quality,
     }
 
 
 def _summarize_group(
-    group_key: tuple[Any, ...],
-    group_fields: list[str],
+    dataset: str,
     results: list[BenchmarkResult],
     profile: Mapping[str, Any],
     parse_failures: list[dict[str, Any]],
@@ -82,7 +74,7 @@ def _summarize_group(
     missing_ref_fields: list[dict[str, Any]],
 ) -> dict[str, Any]:
     group_summary: dict[str, Any] = {
-        "group_key": _group_key_to_label(group_key, group_fields),
+        "dataset": dataset,
         "sample_count": len(results),
         "metrics": {},
     }
@@ -96,7 +88,7 @@ def _summarize_group(
             parse_failures=parse_failures,
             ambiguous_extractions=ambiguous_extractions,
             missing_ref_fields=missing_ref_fields,
-            group_key=group_key,
+            dataset=dataset,
         )
 
     return group_summary
@@ -108,7 +100,7 @@ def _summarize_mcq_group(
     parse_failures: list[dict[str, Any]],
     ambiguous_extractions: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
-    group_key: tuple[Any, ...],
+    dataset: str,
 ) -> dict[str, Any]:
     mcq_cfg = profile.get("mcq", {})
     if not mcq_cfg.get("enabled", True):
@@ -133,7 +125,7 @@ def _summarize_mcq_group(
             missing_ref_fields.append(
                 {
                     "sample_id": result.sample_id,
-                    "group_key": [str(part) for part in group_key],
+                    "dataset": dataset,
                     "field": "ref_fields.answer_idx",
                 }
             )
@@ -152,7 +144,7 @@ def _summarize_mcq_group(
             ambiguous_extractions.append(
                 {
                     "sample_id": result.sample_id,
-                    "group_key": [str(part) for part in group_key],
+                    "dataset": dataset,
                     "candidates": extraction.get("candidates", []),
                 }
             )
@@ -161,7 +153,7 @@ def _summarize_mcq_group(
             parse_failures.append(
                 {
                     "sample_id": result.sample_id,
-                    "group_key": [str(part) for part in group_key],
+                    "dataset": dataset,
                     "status": status,
                 }
             )
@@ -239,9 +231,6 @@ def _build_mcq_classification_summary(label_stats: Mapping[str, Mapping[str, int
             "tp": tp,
             "fp": fp,
             "fn": fn,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
         }
 
     return {
@@ -262,35 +251,6 @@ def _build_mcq_classification_summary(label_stats: Mapping[str, Mapping[str, int
     }
 
 
-def _build_group_keys(result: BenchmarkResult, group_fields: Iterable[str]) -> list[tuple[Any, ...]]:
-    fields = list(group_fields)
-    if not fields:
-        return [tuple()]
-
-    per_field_values: list[list[Any]] = []
-    for field in fields:
-        values = _resolve_group_field_values(result, field)
-        per_field_values.append(values if values else [None])
-
-    return [tuple(parts) for parts in product(*per_field_values)]
-
-
-def _resolve_group_field_values(result: BenchmarkResult, field: str) -> list[Any]:
-    value, found = _get_field_value(result, field)
-    if not found:
-        value, found = _get_field_value(result, f"grouping.{field}")
-
-    if not found:
-        return [None]
-
-    if isinstance(value, list):
-        if not value:
-            return [None]
-        return list(dict.fromkeys(value))
-
-    return [value]
-
-
 def _get_field_value(result: BenchmarkResult, field_path: str) -> tuple[Any, bool]:
     current: Any = result
     for part in field_path.split("."):
@@ -305,10 +265,6 @@ def _get_field_value(result: BenchmarkResult, field_path: str) -> tuple[Any, boo
         else:
             return None, False
     return current, True
-
-
-def _group_key_to_label(group_key: tuple[Any, ...], group_fields: Iterable[str]) -> dict[str, Any]:
-    return {field: value for field, value in zip(group_fields, group_key, strict=False)}
 
 
 def _build_quality_summary(

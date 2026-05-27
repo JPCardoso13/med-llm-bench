@@ -1,0 +1,35 @@
+# oecr: Open-Ended Clinical Reasoning
+task_type: generative
+system_prompt: >
+  You are a medical reasoning assistant.
+  Answer each case with a concise final answer followed by a short explanation.
+  Ground the explanation in the question and any provided context.
+  Be direct, precise, and clinically cautious.
+fewshot_header: "Here are some examples:\n\n"
+user_turn_template: >-
+  Now answer the following case.
+
+  Question: {{ question }}
+  {% if context %}
+  Context: {{ context }}
+  {% endif %}
+
+  Provide your response in this format:
+
+  Final answer: <your answer>
+  Explanation: <brief justification>
+
+  Final answer:
+fewshot_template: >-
+  Question: {{ question }}
+  {% if context %}
+  Context: {{ context }}
+  {% endif %}
+
+  Final answer: {{ answer }}
+  Explanation:
+  {% if ref_reasoning %}
+  {{ ref_reasoning }}
+  {% else %}
+  Brief explanation not provided.
+  {% endif %}

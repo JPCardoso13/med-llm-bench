@@ -201,15 +201,6 @@ def main() -> None:
 
     overall_summary = calculate_system_metrics(all_results, systems_profile)
 
-    # add backend metadata and remove group_by from summary; remove backend from each group_key
-    backend_meta = getattr(backend, "model_id", None)
-    overall_summary.pop("group_by", None)
-    if backend_meta is not None:
-        overall_summary["backend"] = backend_meta
-    for g in overall_summary.get("groups", []):
-        if isinstance(g.get("group_key"), dict):
-            g["group_key"].pop("backend", None)
-
     model_name = str(model_cfg.get("model_id"))
     summary_path = resolve_systems_summary_json_path(task_cfg, model_name)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,12 +209,6 @@ def main() -> None:
     cognitive_summary_path = None
     if cognitive_profile.get("enabled", True):
         cognitive_overall_summary = calculate_cognitive_metrics(all_results, cognitive_profile)
-        cognitive_overall_summary.pop("group_by", None)
-        if backend_meta is not None:
-            cognitive_overall_summary["backend"] = backend_meta
-        for g in cognitive_overall_summary.get("groups", []):
-            if isinstance(g.get("group_key"), dict):
-                g["group_key"].pop("backend", None)
 
         cognitive_summary_path = resolve_cognitive_summary_json_path(task_cfg, model_name)
         cognitive_summary_path.parent.mkdir(parents=True, exist_ok=True)

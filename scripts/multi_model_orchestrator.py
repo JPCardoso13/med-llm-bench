@@ -242,22 +242,7 @@ def compute_and_save_metrics(model_name: str, raw_path: Path, task_id: str, syst
 
     all_results = [BenchmarkResult(**r) for r in flattened]
 
-    # extract backend metadata (assumes consistent backend per run)
-    backend_meta = None
-    if all_results:
-        backend_meta = getattr(all_results[0], "backend", None)
-
     overall_summary = calculate_system_metrics(all_results, systems_profile)
-
-    # Remove profile-level group_by (we don't want this controlling filesystem layout)
-    overall_summary.pop("group_by", None)
-    if backend_meta is not None:
-        overall_summary["backend"] = backend_meta
-
-    # Remove backend from each group's group_key so backend is only top-level metadata
-    for g in overall_summary.get("groups", []):
-        if isinstance(g.get("group_key"), dict):
-            g["group_key"].pop("backend", None)
 
     # Write summaries into per-model directory under task
     task_model_dir = REPORTS_DIR / task_id / model_name
@@ -269,12 +254,6 @@ def compute_and_save_metrics(model_name: str, raw_path: Path, task_id: str, syst
     cognitive_summary_path = None
     if cognitive_profile.get("enabled", True):
         cognitive_overall_summary = calculate_cognitive_metrics(all_results, cognitive_profile)
-        cognitive_overall_summary.pop("group_by", None)
-        if backend_meta is not None:
-            cognitive_overall_summary["backend"] = backend_meta
-        for g in cognitive_overall_summary.get("groups", []):
-            if isinstance(g.get("group_key"), dict):
-                g["group_key"].pop("backend", None)
 
         cognitive_summary_path = task_model_dir / "cognitive_summary.json"
         cognitive_summary_path.write_text(json.dumps(cognitive_overall_summary, indent=2), encoding="utf-8")

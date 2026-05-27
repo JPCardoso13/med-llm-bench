@@ -1,0 +1,62 @@
+schema_version: 1
+
+profile_id: cognitive.generative
+scope: cognitive
+task_type: generative
+
+enabled: true
+
+mcq:
+  enabled: false
+
+extraction:
+  final_answer:
+    type: regex
+    pattern: (?i)final\s*answer[:\-\s]*([\s\S]+?)$
+    trim: true
+  explanation:
+    type: regex
+    pattern: (?i)explanation[:\-\s]*([\s\S]+?)$
+    trim: true
+
+generative:
+  enabled: true
+  exact_match:
+    enabled: true
+    target: answer
+    case_sensitive: false
+    normalize_whitespace: true
+    lowercase: true
+    strip_punctuation: true
+    normalization: strict
+  loose_match:
+    enabled: true
+    target: explanation
+
+semantic_similarity:
+  rouge:
+    enabled: true
+    variants: [L, 1, 2]
+    min_score: 0.2
+    target: explanation
+  bertscore:
+    enabled: true
+    language: en
+    threshold: 0.8
+    target: explanation
+
+llm_judge:
+  enabled: false
+  judge_prompt_config: null
+  rubric:
+    answer_correctness: true
+    explanation_faithfulness: true
+    explanation_completeness: true
+    clinical_safety: true
+    clarity: true
+    conciseness: true
+
+quality_checks:
+  fail_on_missing_ref_fields: false
+  warn_on_parse_failures: true
+  warn_on_extraction_ambiguity: true

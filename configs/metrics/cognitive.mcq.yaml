@@ -22,6 +22,9 @@ mcq:
   parsing:
     enabled: true
 
+generative:
+  enabled: false
+
 semantic_similarity:
   enabled: false
 
