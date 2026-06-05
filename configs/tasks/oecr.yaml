@@ -14,7 +14,7 @@ datasets:
 
   - name: medcasereasoning
     config: configs/datasets/medcasereasoning.yaml
-    enabled: false
+    enabled: true
     eval_limit: 10
 
 execution:

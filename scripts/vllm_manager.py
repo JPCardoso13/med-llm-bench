@@ -55,7 +55,7 @@ def _terminate_process_tree(process: subprocess.Popen[Any], timeout_s: int = 20)
 def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[str]:
     model_id = str(model_cfg.get("model_id"))
     tp = int(model_cfg.get("tensor_parallel_size", 1))
-    max_model_len = int(model_cfg.get("max_model_len", 4096))
+    max_model_len = int(model_cfg.get("max_model_len", 8192))
     gpu_mem_util = float(model_cfg.get("gpu_memory_utilization", 0.8))
 
     cmd = [

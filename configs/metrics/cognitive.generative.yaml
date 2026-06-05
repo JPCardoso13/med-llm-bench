@@ -12,11 +12,11 @@ mcq:
 extraction:
   final_answer:
     type: regex
-    pattern: (?i)final\s*answer[:\-\s]*([\s\S]+?)$
+    pattern: (?is)final\s*answer[:\-\s]*(.*?)(?=\n\s*explanation\s*[:\-]|$)
     trim: true
   explanation:
     type: regex
-    pattern: (?i)explanation[:\-\s]*([\s\S]+?)$
+    pattern: (?is)explanation[:\-\s]*(.*)$
     trim: true
 
 generative:

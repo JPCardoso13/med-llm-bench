@@ -13,6 +13,10 @@
 # - No internet, big storage: HF_OFFLINE=1 HF_CACHE_MODE=persistent HF_EVICT_BETWEEN_MODELS=0
 # - Internet, small storage: HF_OFFLINE=0 HF_CACHE_MODE=ephemeral HF_EVICT_BETWEEN_MODELS=1
 
+export HF_OFFLINE=1
+export HF_CACHE_MODE=persistent
+export HF_EVICT_BETWEEN_MODELS=0
+
 set -euo pipefail
 
 SINGULARITY_BIN="${SINGULARITY_BIN:-$(command -v singularity || true)}"
