@@ -79,6 +79,9 @@ def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[
     if model_cfg.get("enforce_eager", True):
         cmd.append("--enforce-eager")
 
+    if model_cfg.get("trust_remote_code", False):
+        cmd.append("--trust-remote-code")
+
     if distributed:
         cmd.extend(["--distributed-executor-backend", "ray"])
     elif tp > 1:

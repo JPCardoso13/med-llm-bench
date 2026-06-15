@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from difflib import SequenceMatcher
 import re
 import string
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from llm_bench.metrics.answer_extraction import extract_mcq_answer_letter
 from llm_bench.metrics.answer_extraction import clean_response_text
@@ -78,6 +77,10 @@ def _summarize_group(
     ambiguous_extractions: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    group_parse_failures: list[dict[str, Any]] = []
+    group_ambiguous_extractions: list[dict[str, Any]] = []
+    group_missing_ref_fields: list[dict[str, Any]] = []
+
     group_summary: dict[str, Any] = {
         "dataset": dataset,
         "sample_count": len(results),
@@ -90,19 +93,29 @@ def _summarize_group(
         group_summary["metrics"]["mcq"] = _summarize_mcq_group(
             results=results,
             profile=profile,
-            parse_failures=parse_failures,
-            ambiguous_extractions=ambiguous_extractions,
-            missing_ref_fields=missing_ref_fields,
+            parse_failures=group_parse_failures,
+            ambiguous_extractions=group_ambiguous_extractions,
+            missing_ref_fields=group_missing_ref_fields,
             dataset=dataset,
         )
     elif task_type == "generative":
         group_summary["metrics"]["generative"] = _summarize_generative_group(
             results=results,
             profile=profile,
-            parse_failures=parse_failures,
-            missing_ref_fields=missing_ref_fields,
+            parse_failures=group_parse_failures,
+            missing_ref_fields=group_missing_ref_fields,
             dataset=dataset,
         )
+
+    parse_failures.extend(group_parse_failures)
+    ambiguous_extractions.extend(group_ambiguous_extractions)
+    missing_ref_fields.extend(group_missing_ref_fields)
+
+    group_summary["quality"] = {
+        "parse_failure_count": len(group_parse_failures),
+        "ambiguous_extraction_count": len(group_ambiguous_extractions),
+        "missing_ref_field_count": len(group_missing_ref_fields),
+    }
 
     return group_summary
 
@@ -119,17 +132,18 @@ def _summarize_generative_group(
         return {}
 
     exact_match_cfg = generative_cfg.get("exact_match", {})
-    loose_match_cfg = generative_cfg.get("loose_match", {})
-    semantic_similarity_cfg = profile.get("semantic_similarity", {})
+    answer_token_f1_cfg = generative_cfg.get("answer_token_f1", {})
+    reporting_cfg = profile.get("reporting", {})
+    expl_token_f1_cfg = profile.get("similarity", {}).get("token_f1", {})
 
-    answer_scores: list[float] = []
-    explanation_loose_scores: list[float] = []
-    rouge_scores: list[float] = []
-    bertscore_scores: list[float] = []
-    bertscore_threshold = semantic_similarity_cfg.get("bertscore", {}).get("threshold")
+    answer_exact_scores: list[float] = []
+    answer_token_f1_scores: list[float] = []
+    explanation_token_f1_scores: list[float] = []
 
     evaluated_count = 0
     parsed_count = 0
+    contaminated_count = 0
+    per_sample_rows: list[dict[str, Any]] = []
 
     for result in results:
         ref_answer = str(result.ref_fields.get("answer", "")).strip()
@@ -143,14 +157,12 @@ def _summarize_generative_group(
                     "field": "ref_fields.answer",
                 }
             )
-            continue
-
-        if not ref_reasoning:
-            missing_ref_fields.append(
+            per_sample_rows.append(
                 {
                     "sample_id": result.sample_id,
                     "dataset": dataset,
-                    "field": "ref_fields.ref_reasoning",
+                    "status": "missing_ref_fields",
+                    "missing_fields": ["ref_fields.answer"],
                 }
             )
             continue
@@ -158,117 +170,207 @@ def _summarize_generative_group(
         extracted = _extract_generative_response(result.response, profile)
         predicted_answer = extracted["final_answer"]
         predicted_explanation = extracted["explanation"]
+        answer_contaminated = bool(extracted.get("answer_contaminated", False))
 
-        if predicted_answer is None or predicted_explanation is None:
+        if predicted_answer is None:
             parse_failures.append(
                 {
                     "sample_id": result.sample_id,
                     "dataset": dataset,
                     "status": "missing",
-                    "missing_fields": [
-                        name
-                        for name, value in (("final_answer", predicted_answer), ("explanation", predicted_explanation))
-                        if value is None
-                    ],
+                    "missing_fields": ["final_answer"],
+                }
+            )
+            per_sample_rows.append(
+                {
+                    "sample_id": result.sample_id,
+                    "dataset": dataset,
+                    "status": "parse_failure",
+                    "missing_fields": ["final_answer"],
                 }
             )
             continue
 
         parsed_count += 1
         evaluated_count += 1
+        if answer_contaminated:
+            contaminated_count += 1
 
-        answer_scores.append(
+        answer_exact = (
             1.0 if _normalize_text(predicted_answer, exact_match_cfg) == _normalize_text(ref_answer, exact_match_cfg) else 0.0
         )
-
-        explanation_loose_scores.append(
-            _sequence_similarity(
-                _normalize_text(predicted_explanation, loose_match_cfg),
-                _normalize_text(ref_reasoning, loose_match_cfg),
-            )
+        answer_f1 = _token_f1_score(
+            _normalize_text(predicted_answer, answer_token_f1_cfg),
+            _normalize_text(ref_answer, answer_token_f1_cfg),
         )
 
-        rouge_scores.append(
-            _token_f1_score(
-                _normalize_text(predicted_explanation, semantic_similarity_cfg.get("rouge", {})),
-                _normalize_text(ref_reasoning, semantic_similarity_cfg.get("rouge", {})),
+        answer_exact_scores.append(answer_exact)
+        answer_token_f1_scores.append(answer_f1)
+
+        explanation_token_f1 = None
+        if ref_reasoning and predicted_explanation:
+            explanation_token_f1 = _token_f1_score(
+                _normalize_text(predicted_explanation, expl_token_f1_cfg),
+                _normalize_text(ref_reasoning, expl_token_f1_cfg),
             )
+            explanation_token_f1_scores.append(explanation_token_f1)
+
+        composite_score = 0.5 * answer_exact + 0.5 * answer_f1
+        per_sample_rows.append(
+            {
+                "sample_id": result.sample_id,
+                "dataset": dataset,
+                "status": "ok",
+                "answer_exact": answer_exact,
+                "answer_token_f1": answer_f1,
+                "format_ok": not answer_contaminated,
+                "answer_contaminated": answer_contaminated,
+                "explanation_token_f1": explanation_token_f1,
+                "composite_score": composite_score,
+                "response_preview": _safe_preview(result.response, reporting_cfg),
+                "final_answer": _safe_preview(predicted_answer, reporting_cfg),
+                "reference_answer": _safe_preview(ref_answer, reporting_cfg),
+                "explanation_preview": _safe_preview(predicted_explanation, reporting_cfg),
+            }
         )
 
-        bertscore_scores.append(
-            _sequence_similarity(
-                _normalize_text(predicted_explanation, semantic_similarity_cfg.get("bertscore", {})),
-                _normalize_text(ref_reasoning, semantic_similarity_cfg.get("bertscore", {})),
-            )
-        )
+    answer_exact_summary = aggregate_values(answer_exact_scores, ["mean", "min", "max"])
+    answer_token_f1_summary = aggregate_values(answer_token_f1_scores, ["mean", "min", "max"])
+    explanation_token_f1_summary = aggregate_values(explanation_token_f1_scores, ["mean", "min", "max"])
 
-    answer_summary = aggregate_values(answer_scores, ["mean", "min", "max"])
-    explanation_loose_summary = aggregate_values(explanation_loose_scores, ["mean", "min", "max"])
-    rouge_summary = aggregate_values(rouge_scores, ["mean", "min", "max"])
-    bertscore_summary = aggregate_values(bertscore_scores, ["mean", "min", "max"])
-
-    answer_summary["correct_count"] = int(sum(answer_scores))
-    answer_summary["evaluated_count"] = len(answer_scores)
-    answer_summary["accuracy"] = (
-        answer_summary["correct_count"] / answer_summary["evaluated_count"] if answer_summary["evaluated_count"] > 0 else None
+    answer_exact_summary["correct_count"] = int(sum(answer_exact_scores))
+    answer_exact_summary["evaluated_count"] = len(answer_exact_scores)
+    answer_exact_summary["accuracy"] = (
+        answer_exact_summary["correct_count"] / answer_exact_summary["evaluated_count"]
+        if answer_exact_summary["evaluated_count"] > 0
+        else None
     )
 
-    explanation_loose_summary["evaluated_count"] = len(explanation_loose_scores)
-    rouge_summary["evaluated_count"] = len(rouge_scores)
-    bertscore_summary["evaluated_count"] = len(bertscore_scores)
+    answer_token_f1_summary["evaluated_count"] = len(answer_token_f1_scores)
+    explanation_token_f1_summary["evaluated_count"] = len(explanation_token_f1_scores)
 
-    if bertscore_threshold is not None:
-        bertscore_summary["threshold"] = float(bertscore_threshold)
-        bertscore_summary["above_threshold_count"] = sum(1 for score in bertscore_scores if score >= float(bertscore_threshold))
-        bertscore_summary["above_threshold_rate"] = (
-            bertscore_summary["above_threshold_count"] / bertscore_summary["evaluated_count"]
-            if bertscore_summary["evaluated_count"] > 0
-            else None
-        )
+    format_summary = {
+        "parse_success_count": parsed_count,
+        "parse_failure_count": len(parse_failures),
+        "answer_contaminated_count": contaminated_count,
+        "parse_success_rate": (parsed_count / len(results)) if results else None,
+        "answer_clean_rate": (1.0 - (contaminated_count / parsed_count)) if parsed_count > 0 else None,
+    }
 
-    return {
+    summary = {
         "dataset": dataset,
         "sample_count": len(results),
         "metrics": {
             "answer": {
-                "exact_match": answer_summary,
+                "exact_match": answer_exact_summary,
+                "token_f1": answer_token_f1_summary,
             },
+            "format": format_summary,
             "explanation": {
-                "loose_match": explanation_loose_summary,
-                "semantic_similarity": {
-                    "rouge": rouge_summary,
-                    "bertscore": bertscore_summary,
-                },
+                "token_f1": explanation_token_f1_summary,
             },
-        },
-        "quality": {
-            "parse_failure_count": len(parse_failures),
-            "missing_ref_field_count": len(missing_ref_fields),
-            "parsed_count": parsed_count,
         },
     }
 
+    diagnostics = _build_generative_diagnostics(per_sample_rows, reporting_cfg)
+    if diagnostics:
+        summary["diagnostics"] = diagnostics
 
-def _extract_generative_response(response: str, profile: Mapping[str, Any]) -> dict[str, str | None]:
+    return summary
+
+
+def _build_generative_diagnostics(rows: list[dict[str, Any]], cfg: Mapping[str, Any]) -> dict[str, Any]:
+    if not cfg.get("enabled", False):
+        return {}
+
+    top_k_worst = int(cfg.get("top_k_worst", 20))
+    top_k_best = int(cfg.get("top_k_best", 5))
+    include_per_sample = bool(cfg.get("include_per_sample", False))
+    per_sample_limit = int(cfg.get("per_sample_limit", 1000))
+
+    ok_rows = [row for row in rows if row.get("status") == "ok"]
+    sorted_ok = sorted(ok_rows, key=lambda row: float(row.get("composite_score", 0.0)))
+
+    diagnostics: dict[str, Any] = {
+        "configured": {
+            "top_k_worst": top_k_worst,
+            "top_k_best": top_k_best,
+            "include_per_sample": include_per_sample,
+            "per_sample_limit": per_sample_limit,
+        },
+        "worst_samples": sorted_ok[: max(0, top_k_worst)],
+        "best_samples": list(reversed(sorted_ok[-max(0, top_k_best):])) if top_k_best > 0 else [],
+    }
+
+    if include_per_sample:
+        diagnostics["per_sample"] = rows[: max(0, per_sample_limit)]
+
+    return diagnostics
+
+
+def _safe_preview(value: str | None, cfg: Mapping[str, Any]) -> str:
+    if not cfg.get("include_text_preview", True):
+        return ""
+
+    text = str(value or "")
+    max_chars = int(cfg.get("text_preview_chars", 220))
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "..."
+
+
+def _extract_generative_response(response: str, profile: Mapping[str, Any]) -> dict[str, Any]:
     cleaned = clean_response_text(response)
     extraction_cfg = profile.get("extraction", {})
     final_answer = _extract_section(cleaned, extraction_cfg.get("final_answer", {}), fallback_label="final answer")
     explanation = _extract_section(cleaned, extraction_cfg.get("explanation", {}), fallback_label="explanation")
+    final_answer, answer_contaminated = _normalize_final_answer(final_answer)
     return {
         "final_answer": final_answer,
         "explanation": explanation,
+        "answer_contaminated": answer_contaminated,
     }
 
 
 def _extract_section(text: str, section_cfg: Mapping[str, Any], fallback_label: str) -> str | None:
     value = _extract_by_regex(text, section_cfg.get("pattern"))
     if value is None:
-        value = _extract_by_regex(text, rf"(?is){re.escape(fallback_label)}\s*[:\-\s]*(.*)$")
+        if fallback_label == "final answer":
+            value = _extract_by_regex(
+                text,
+                rf"(?is){re.escape(fallback_label)}\s*[:\-\s]*(.*?)(?=\n\s*explanation\s*[:\-]|\bexplanation\s*[:\-]|$)",
+            )
+            if value is None:
+                value = _extract_by_regex(text, rf"(?is){re.escape(fallback_label)}\s*[:\-\s]*(.*)$")
+        else:
+            value = _extract_by_regex(text, rf"(?is){re.escape(fallback_label)}\s*[:\-\s]*(.*)$")
     if value is None:
         return None
     if section_cfg.get("trim", True):
         value = value.strip()
     return value or None
+
+
+def _normalize_final_answer(final_answer: str | None) -> tuple[str | None, bool]:
+    if final_answer is None:
+        return None, False
+
+    value = str(final_answer).strip()
+    contaminated = False
+
+    explanation_marker = re.search(r"(?is)\bexplanation\s*[:\-]", value)
+    if explanation_marker:
+        contaminated = True
+        value = value[: explanation_marker.start()].strip()
+
+    if "\n" in value:
+        contaminated = True
+        value = value.splitlines()[0].strip()
+
+    value = value.strip().rstrip(". ")
+    return (value or None), contaminated
 
 
 def _extract_by_regex(text: str, pattern: str | None) -> str | None:
@@ -320,14 +422,6 @@ def _token_f1_score(prediction: str, reference: str) -> float:
     if precision + recall == 0:
         return 0.0
     return 2.0 * precision * recall / (precision + recall)
-
-
-def _sequence_similarity(prediction: str, reference: str) -> float:
-    if not prediction and not reference:
-        return 1.0
-    if not prediction or not reference:
-        return 0.0
-    return SequenceMatcher(None, prediction, reference).ratio()
 
 
 def _summarize_mcq_group(

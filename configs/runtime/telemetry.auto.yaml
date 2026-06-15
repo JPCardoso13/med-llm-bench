@@ -4,4 +4,4 @@ telemetry:
   timeout_s: 1.5
   window_path: /window
   endpoints:
-    - http://10.2.3.1:9101
+    - http://10.2.3.9:9101

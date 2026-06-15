@@ -14,12 +14,8 @@ user_turn_template: >-
   Context: {{ context }}
   {% endif %}
 
-  Provide your response in this format:
-
-  Final answer: <your answer>
-  Explanation: <brief justification>
-
   Final answer:
+  Explanation:
 fewshot_template: >-
   Question: {{ question }}
   {% if context %}
