@@ -6,4 +6,5 @@ tensor_parallel_size: 1
 max_model_len: 8192
 gpu_memory_utilization: 0.85
 enforce_eager: false
+trust_remote_code: true
 startup_timeout_s: 2400
