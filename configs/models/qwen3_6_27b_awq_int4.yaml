@@ -1,0 +1,9 @@
+name: qwen3_6_27b_awq_int4
+engine: vllm
+model_id: cyankiwi/Qwen3.6-27B-AWQ-INT4
+backend_api: openai_compatible
+tensor_parallel_size: 1
+max_model_len: 8192
+gpu_memory_utilization: 0.85
+enforce_eager: false
+startup_timeout_s: 2400

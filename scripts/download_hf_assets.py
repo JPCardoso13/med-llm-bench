@@ -1,45 +1,33 @@
-#!/usr/bin/env python3
-"""Download a fixed set of Hugging Face models and datasets into the local cache."""
-
 import os
 from pathlib import Path
 
+import yaml
 
-MODELS = [
-    "meta-llama/Meta-Llama-3-8B-Instruct",
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "microsoft/Phi-3-mini-4k-instruct",
-    "Qwen/Qwen2.5-3B-Instruct",
-    "Qwen/Qwen3-32B-AWQ",
-]
 
-DATASETS = [
-    {
-        "repo_id": "GBaker/MedQA-USMLE-4-options",
-        "subset": None,
-        "splits": ["test", "train"],
-    },
-    {
-        "repo_id": "TsinghuaC3I/MedXpertQA",
-        "subset": "Text",
-        "splits": ["test", "dev"],
-    },
-    {
-        "repo_id": "nsk7153/MedCalc-Bench-Verified",
-        "subset": None,
-        "splits": ["test", "one_shot"],
-    },
-    {
-        "repo_id": "zou-lab/MedCaseReasoning",
-        "subset": None,
-        "splits": ["test", "val"],
-    },
-    {
-        "repo_id": "ccdv/pubmed-summarization",
-        "subset": "document",
-        "splits": ["test[:1000]", "train[:1000]"],
-    },
-]
+def _load_model_ids(models_dir: Path) -> list[str]:
+    model_ids = []
+    for yaml_file in sorted(models_dir.glob("*.yaml")):
+        cfg = yaml.safe_load(yaml_file.read_text())
+        model_ids.append(cfg["model_id"])
+    return model_ids
+
+
+def _load_dataset_configs(datasets_dir: Path) -> list[dict]:
+    configs = []
+    for yaml_file in sorted(datasets_dir.glob("*.yaml")):
+        if yaml_file.stem == "template":
+            continue
+        cfg = yaml.safe_load(yaml_file.read_text())
+        source = cfg.get("source", {})
+        if "hub_path" not in source:
+            continue
+        splits = list(cfg.get("splits", {}).values())
+        configs.append({
+            "repo_id": source["hub_path"],
+            "subset": source.get("subset"),
+            "splits": splits,
+        })
+    return configs
 
 
 def main() -> int:
@@ -66,10 +54,16 @@ def main() -> int:
     print("HF hub cache: {0}".format(hub_cache))
     print("HF datasets cache: {0}".format(datasets_cache))
 
+    models_dir = workdir / "configs" / "models"
+    datasets_dir = workdir / "configs" / "datasets"
+
+    models = _load_model_ids(models_dir)
+    dataset_configs = _load_dataset_configs(datasets_dir)
+
     failures = []
 
     print("=== Downloading models ===")
-    for repo_id in MODELS:
+    for repo_id in models:
         try:
             local_path = snapshot_download(repo_id=repo_id, cache_dir=str(hub_cache), repo_type="model")
             print("{0} -> {1}".format(repo_id, local_path))
@@ -78,7 +72,7 @@ def main() -> int:
             print("ERROR model {0}: {1}".format(repo_id, exc))
 
     print("=== Downloading datasets ===")
-    for dataset_cfg in DATASETS:
+    for dataset_cfg in dataset_configs:
         repo_id = dataset_cfg["repo_id"]
         subset = dataset_cfg["subset"]
         splits = dataset_cfg["splits"]
