@@ -6,10 +6,9 @@ task_type: generative
 
 enabled: true
 
-mcq:
-  enabled: false
-
 extraction:
+  enabled: true
+  type: sections
   final_answer:
     type: regex
     pattern: (?is)final\s*answer[:\-\s]*(.*?)(?=\n\s*explanation\s*[:\-]|$)
@@ -19,30 +18,37 @@ extraction:
     pattern: (?is)explanation[:\-\s]*(.*)$
     trim: true
 
+reporting:
+  enabled: true
+  top_k_worst: 20
+  top_k_best: 5
+  include_per_sample: false
+  per_sample_limit: 1000
+  include_text_preview: true
+  text_preview_chars: 220
+
+mcq:
+  enabled: false
+
 generative:
   enabled: true
   exact_match:
     enabled: true
     target: answer
-    case_sensitive: false
-    normalize_whitespace: true
     lowercase: true
+    normalize_whitespace: true
     strip_punctuation: true
-    normalization: strict
-  loose_match:
+  answer_token_f1:
     enabled: true
-    target: explanation
+    target: answer
+    lowercase: true
+    normalize_whitespace: true
+    strip_punctuation: true
 
-semantic_similarity:
-  rouge:
+similarity:
+  enabled: true
+  token_f1:
     enabled: true
-    variants: [L, 1, 2]
-    min_score: 0.2
-    target: explanation
-  bertscore:
-    enabled: true
-    language: en
-    threshold: 0.8
     target: explanation
 
 llm_judge:

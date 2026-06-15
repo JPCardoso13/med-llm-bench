@@ -6,6 +6,19 @@ task_type: mcq
 
 enabled: true
 
+extraction:
+  enabled: true
+  type: none
+
+reporting:
+  enabled: true
+  top_k_worst: 20
+  top_k_best: 5
+  include_per_sample: false
+  per_sample_limit: 1000
+  include_text_preview: true
+  text_preview_chars: 220
+
 mcq:
   enabled: true
   accuracy:
@@ -25,7 +38,7 @@ mcq:
 generative:
   enabled: false
 
-semantic_similarity:
+similarity:
   enabled: false
 
 llm_judge:
