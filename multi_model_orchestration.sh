@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --nodes=1
-#SBATCH --gpus=1
+#SBATCH --gpus=2
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=64
 #SBATCH --time=02:00:00
 #SBATCH --partition=normal-a100-80
 #SBATCH --account=F202500001HPCVLABEPICUREG
