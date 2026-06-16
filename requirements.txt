@@ -1,5 +1,5 @@
-vllm==0.19.0
-accelerate>=1.1.0
+vllm==0.19.1
+accelerate
 requests
 pydantic
 datasets
