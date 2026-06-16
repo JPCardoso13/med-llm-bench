@@ -1,5 +1,5 @@
 # Base image
-FROM nvidia/cuda:12.9.0-devel-ubuntu22.04
+FROM ubuntu:22.04
 
 # Working directory
 WORKDIR /app
@@ -9,9 +9,6 @@ RUN apt-get update && apt-get install -y python3-pip git && rm -rf /var/lib/apt/
 
 # Upgrade pip
 RUN pip3 install --no-cache-dir --upgrade pip
-
-# Environment variables
-ENV CUDA_HOME=/usr/local/cuda
 
 # Python dependencies
 COPY requirements.txt .
