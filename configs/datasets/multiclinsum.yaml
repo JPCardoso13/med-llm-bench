@@ -1,0 +1,16 @@
+source:
+  name: "multiclinsum"
+  data_files:
+    eval: "data/processed/multiclinsum/eval.jsonl"
+    fewshot: "data/processed/multiclinsum/fewshot.jsonl"
+
+schema: "GenerativeSample"
+
+mapping:
+  id: "id"
+  question: "question"
+  answer: "answer"
+  grouping:
+    length_bin: "length_bin"
+  metadata:
+    file_id: "file_id"
