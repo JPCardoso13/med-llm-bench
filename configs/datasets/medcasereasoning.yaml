@@ -8,6 +8,8 @@ splits:
 
 schema: "GenerativeSample"
 
+preprocess_script: "scripts/dataset_creation/medcasereasoning/preprocess.py"
+
 mapping:
   question: "case_prompt"
   ref_reasoning: "diagnostic_reasoning"
