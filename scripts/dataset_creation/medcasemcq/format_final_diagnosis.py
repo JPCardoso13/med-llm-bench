@@ -4,17 +4,16 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datasets import load_dataset
-from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
 DATASET = "zou-lab/MedCaseReasoning"
-SPLIT = "val"
-MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
-DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/formatted_diagnoses.jsonl"
-DEFAULT_ERROR_LOG_PATH = "data/interim/medcasereasoning/formatting_errors.jsonl"
+DEFAULT_SPLIT = "val"
+MODEL_NAME = "Qwen/Qwen3-32B"
+DEFAULT_OUTPUT_PATH = "data/semi_processed/medcasemcq/fewshot/formatted_diagnoses_val.jsonl"
+DEFAULT_ERROR_LOG_PATH = "logs/dataset_creation/medcasemcq/fewshot/formatting_errors.jsonl"
 MAX_RETRIES = 3
 TEMPERATURE_SCHEDULE = [0.1, 0.3, 0.5] # Kept very low because this is a deterministic formatting task
-NUM_GPUS = 1
+NUM_GPUS = 2
 
 SYSTEM_PROMPT = """You are a strict medical text formatting assistant.
 
@@ -36,6 +35,8 @@ Examples:
 
 Return ONLY valid JSON in this exact format:
 {"formatted_diagnosis": "String"}
+
+/no_think
 """
 
 def extract_json(text: str) -> Optional[Dict[str, object]]:
@@ -54,12 +55,12 @@ def strip_for_compare(text: str) -> str:
 def validate_formatting(original: str, formatted: object) -> Tuple[bool, str, Optional[str]]:
     if not isinstance(formatted, str) or not formatted.strip():
         return False, "Missing or invalid 'formatted_diagnosis' string.", None
-    
+
     cleaned = formatted.strip()
-    
+
     orig_stripped = strip_for_compare(original)
     form_stripped = strip_for_compare(cleaned)
-    
+
     if orig_stripped != form_stripped:
         return False, f"Hallucination detected. Core characters changed. Expected base '{orig_stripped}', got '{form_stripped}'. Do not add, remove, or alter words.", None
 
@@ -67,125 +68,142 @@ def validate_formatting(original: str, formatted: object) -> Tuple[bool, str, Op
 
 def build_user_prompt(original: str, attempt: int, previous_failure: Optional[str]) -> str:
     base = f"Raw Diagnosis Input:\n{original}\n\nReturn ONLY JSON with key 'formatted_diagnosis'."
-    
+
     if attempt == 1:
         return base
 
     feedback = previous_failure or "Previous output did not satisfy validation."
-    # print("ATTEMPTING RETRY")
     return (
         f"{base}\n\n"
         f"Validation feedback from previous attempt: {feedback}\n"
         "STRICT: You must not change the actual words or characters. Only fix spaces and capitalization."
     )
 
-def format_diagnosis(llm: LLM, original: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    previous_failure = None
-    last_llm_output = None
-    last_user_prompt = None
+def process_batch(llm: LLM, records: List[dict], attempt: int) -> Tuple[List[dict], List[dict]]:
+    temperature = TEMPERATURE_SCHEDULE[attempt - 1]
+    sampling_params = SamplingParams(temperature=temperature, max_tokens=64)
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        temperature = TEMPERATURE_SCHEDULE[attempt - 1]
-        sampling_params = SamplingParams(temperature=temperature, max_tokens=64)
-
-        prompt = build_user_prompt(original, attempt, previous_failure)
-        last_user_prompt = prompt
-
-        messages = [
+    messages = []
+    for row in records:
+        prompt = build_user_prompt(row["original_diagnosis"], attempt, row.get("failure_reason"))
+        row["_last_user_prompt"] = prompt
+        messages.append([
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
-        ]
+        ])
 
-        output = llm.chat([messages], sampling_params=sampling_params, use_tqdm=False)
-        text = output[0].outputs[0].text
-        last_llm_output = text
+    outputs = llm.chat(messages, sampling_params=sampling_params)
+
+    successful = []
+    failed = []
+
+    for row, output in zip(records, outputs):
+        text = output.outputs[0].text
+        row["_last_llm_output"] = text
 
         payload = extract_json(text)
         if payload is None:
-            previous_failure = "Could not parse a valid JSON object."
+            row["failure_reason"] = "Could not parse a valid JSON object."
+            failed.append(row)
             continue
 
         is_valid, reason, cleaned = validate_formatting(
-            original, payload.get("formatted_diagnosis")
+            row["original_diagnosis"], payload.get("formatted_diagnosis")
         )
-        
+
         if not is_valid:
-            previous_failure = reason
+            row["failure_reason"] = reason
+            failed.append(row)
             continue
 
-        return cleaned, None, None, None
+        row["formatted_diagnosis"] = cleaned
+        row.pop("failure_reason", None)
+        row.pop("_last_user_prompt", None)
+        row.pop("_last_llm_output", None)
+        successful.append(row)
 
-    return None, previous_failure, last_llm_output, last_user_prompt
+    return successful, failed
 
-def main(limit: Optional[int], output_path: str, error_log_path: str) -> None:
+def main(limit: Optional[int], split: str, output_path: str, error_log_path: str) -> None:
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    
     error_log_path_obj = Path(error_log_path)
     error_log_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-    records = load_dataset(DATASET, split=SPLIT)
-    records = records.select(range(min(limit, len(records)))) if limit else records
+    dataset = load_dataset(DATASET, split=split)
+    if limit:
+        dataset = dataset.select(range(min(limit, len(dataset))))
+
+    records = []
+    skipped_empty = 0
+    for row in dataset:
+        case_id = str(row.get("Unnamed: 0", "unknown"))
+        original = row.get("final_diagnosis", "").strip()
+        if not original:
+            skipped_empty += 1
+            print(f"Skipping case_id={case_id}: empty diagnosis.")
+            continue
+        records.append({
+            "case_id": case_id,
+            "pmc_id": row.get("pmcid", ""),
+            "original_diagnosis": original,
+        })
+
+    print(f"Loaded {len(records)} records ({skipped_empty} skipped, empty diagnosis).")
 
     llm = LLM(
         model=MODEL_NAME,
         gpu_memory_utilization=0.9,
+        enforce_eager=True,
         tensor_parallel_size=NUM_GPUS,
-        max_model_len=2048
+        distributed_executor_backend="ray",
+        max_model_len=4096
     )
 
-    success_count = 0
-    skipped_count = 0
-    skipped_case_ids: List[str] = []
+    all_successful = []
+    current_batch = records
 
-    with out_path.open("w", encoding="utf-8") as handle, \
-         error_log_path_obj.open("w", encoding="utf-8") as error_handle:
-        progress = tqdm(records, total=len(records), desc="Formatting Diagnoses")
-        for row in progress:
-            case_id = str(row.get("Unnamed: 0", "unknown"))
-            original_diagnosis = row.get("final_diagnosis", "").strip()
+    for attempt in range(1, MAX_RETRIES + 1):
+        if not current_batch:
+            break
+        print(f"\n--- Attempt {attempt}/{MAX_RETRIES} (Processing {len(current_batch)} record(s)) ---")
+        success, failed = process_batch(llm, current_batch, attempt)
+        all_successful.extend(success)
+        current_batch = failed
+        print(f"Attempt {attempt}: Success={len(success)}, Failed={len(failed)}")
 
-            if not original_diagnosis:
-                skipped_count += 1
-                skipped_case_ids.append(case_id)
-                continue
-
-            formatted_diag, failure_reason, last_output, last_input = format_diagnosis(llm, original_diagnosis)
-
-            if formatted_diag is None:
-                skipped_count += 1
-                skipped_case_ids.append(case_id)
-                print(f"Skipping case_id={case_id}: failed after {MAX_RETRIES} attempts. Reason: {failure_reason}")
-                
-                error_record = {
-                    "case_id": case_id,
-                    "pmc_id": row.get("pmcid", ""),
-                    "llm_input": last_input,
-                    "failure_reason": failure_reason,
-                    "llm_output": last_output
-                }
-                error_handle.write(json.dumps(error_record, ensure_ascii=False) + "\n")
-                continue
-
+    with out_path.open("w", encoding="utf-8") as handle:
+        for row in all_successful:
             record = {
-                "pmc_id": row.get("pmcid", ""),
-                "original_diagnosis": original_diagnosis,
-                "formatted_diagnosis": formatted_diag
+                "pmc_id": row["pmc_id"],
+                "original_diagnosis": row["original_diagnosis"],
+                "formatted_diagnosis": row["formatted_diagnosis"],
             }
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-            success_count += 1
-            progress.set_postfix(success=success_count, skipped=skipped_count)
+
+    with error_log_path_obj.open("w", encoding="utf-8") as error_handle:
+        for row in current_batch:
+            error_record = {
+                "case_id": row["case_id"],
+                "pmc_id": row["pmc_id"],
+                "llm_input": row.get("_last_user_prompt", ""),
+                "failure_reason": row.get("failure_reason", ""),
+                "llm_output": row.get("_last_llm_output", ""),
+            }
+            error_handle.write(json.dumps(error_record, ensure_ascii=False) + "\n")
 
     print("\nRun complete.")
-    print(f"Successful records: {success_count}")
-    print(f"Failed records: {skipped_count}")
-    if skipped_count > 0:
+    print(f"Successful records: {len(all_successful)}")
+    print(f"Failed records: {len(current_batch)}")
+    print(f"Empty diagnosis skipped: {skipped_empty}")
+    if current_batch:
         print(f"Error log written to: {error_log_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Format MedCaseReasoning final diagnoses")
     parser.add_argument("--limit", type=int, default=None, help="Number of entries to process")
-    parser.add_argument("--output_path", type=str, default=DEFAULT_OUTPUT_PATH)
-    parser.add_argument("--error_log_path", type=str, default=DEFAULT_ERROR_LOG_PATH, help="Path to write error logs")
+    parser.add_argument("--split", type=str, default=DEFAULT_SPLIT, help="HuggingFace dataset split to use")
+    parser.add_argument("--outpath", type=str, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument("--errpath", type=str, default=DEFAULT_ERROR_LOG_PATH, help="Path to write error logs")
     args = parser.parse_args()
-    main(limit=args.limit, output_path=args.output_path, error_log_path=args.error_log_path)
+    main(limit=args.limit, split=args.split, output_path=args.outpath, error_log_path=args.errpath)

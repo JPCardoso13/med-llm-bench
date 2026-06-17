@@ -6,11 +6,11 @@ from typing import Dict, List, Optional, Tuple
 from vllm import LLM, SamplingParams
 
 
-INPUT_PATH = "data/semi_processed/medcasemcq/eval/eval_no_specialties.jsonl"
+DEFAULT_INPUT_PATH = "data/semi_processed/medcasemcq/eval/eval_no_specialties.jsonl"
 OUTPUT_PATH = "data/processed/medcasemcq/eval.jsonl"
 DEFAULT_ERROR_LOG_PATH = "logs/dataset_creation/medcasemcq/specialty_labeling_errors.jsonl"
 
-MODEL_NAME = "Qwen/Qwen3-32B-AWQ"
+MODEL_NAME = "Qwen/Qwen3-32B"
 NUM_GPUS = 2
 MAX_RETRIES = 3
 TEMPERATURE_SCHEDULE = [0.1, 0.3, 0.5] 
@@ -125,13 +125,13 @@ def process_batch(llm: LLM, records: List[dict], attempt: int) -> Tuple[List[dic
     return successful_records, failed_records
 
 
-def main(limit: Optional[int], output_path: str, error_log_path: str) -> None:
-    input_file = Path(INPUT_PATH)
+def main(limit: Optional[int], input_path: str, output_path: str, error_log_path: str) -> None:
+    input_file = Path(input_path)
     output_file = Path(output_path)
     error_log_file = Path(error_log_path)
-    
+
     if not input_file.exists():
-        print(f"Error: {INPUT_PATH} not found.")
+        print(f"Error: {input_path} not found.")
         return
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -204,18 +204,9 @@ def main(limit: Optional[int], output_path: str, error_log_path: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Label medical case questions with medical specialties")
     parser.add_argument("--limit", type=int, default=None, help="Number of entries to process")
-    parser.add_argument(
-        "--output_path",
-        type=str,
-        default=OUTPUT_PATH,
-        help="Path for output JSONL file",
-    )
-    parser.add_argument(
-        "--error_log_path",
-        type=str,
-        default=DEFAULT_ERROR_LOG_PATH,
-        help="Path to write hard-failure error logs",
-    )
+    parser.add_argument("--inpath", type=str, default=DEFAULT_INPUT_PATH, help="Path to input JSONL file")
+    parser.add_argument("--outpath", type=str, default=OUTPUT_PATH, help="Path for output JSONL file")
+    parser.add_argument("--errpath", type=str, default=DEFAULT_ERROR_LOG_PATH, help="Path to write hard-failure error logs")
 
     args = parser.parse_args()
-    main(limit=args.limit, output_path=args.output_path, error_log_path=args.error_log_path)
+    main(limit=args.limit, input_path=args.inpath, output_path=args.outpath, error_log_path=args.errpath)

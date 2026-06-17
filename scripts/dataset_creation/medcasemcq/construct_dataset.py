@@ -1,10 +1,11 @@
+import argparse
 import json
 import random
 import re
 from pathlib import Path
 
-INPUT_PATH = "data/interim/medcasereasoning/mcq_dataset_test.jsonl"
-OUTPUT_PATH = "data/processed/mcr_mcq/mcr_mcq.jsonl"
+DEFAULT_INPUT_PATH = "data/semi_processed/medcasemcq/fewshot/val_with_distractors.jsonl"
+DEFAULT_OUTPUT_PATH = "data/semi_processed/medcasemcq/fewshot/fewshot_no_specialties.jsonl"
 
 QUESTION_STEMS = [
     "What is the most likely diagnosis?",
@@ -27,9 +28,9 @@ def normalize_casing_leaks(text: str) -> str:
     text = re.sub(r'(?<=\w\s)Syndrome\b', 'syndrome', text)
     return text
 
-def build_dataset():
-    input_file = Path(INPUT_PATH)
-    output_file = Path(OUTPUT_PATH)
+def build_dataset(input_path: str, output_path: str):
+    input_file = Path(input_path)
+    output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     success_count = 0
@@ -77,8 +78,12 @@ def build_dataset():
             success_count += 1
 
     print("\n--- Dataset Assembly Complete ---")
-    print(f"Output saved to: {OUTPUT_PATH}")
+    print(f"Output saved to: {output_path}")
     print(f"Total records processed: {success_count}")
 
 if __name__ == "__main__":
-    build_dataset()
+    parser = argparse.ArgumentParser(description="Construct MCQ dataset from distractor-annotated JSONL")
+    parser.add_argument("--inpath", type=str, default=DEFAULT_INPUT_PATH, help="Path to input JSONL file")
+    parser.add_argument("--outpath", type=str, default=DEFAULT_OUTPUT_PATH, help="Path for output JSONL file")
+    args = parser.parse_args()
+    build_dataset(input_path=args.inpath, output_path=args.outpath)

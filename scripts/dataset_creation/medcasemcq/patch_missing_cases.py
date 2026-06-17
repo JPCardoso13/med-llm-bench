@@ -11,8 +11,8 @@ MANUAL_PATCHES = {
 }
 
 # Paths
-OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset.jsonl"
-FORMATTED_DIAGNOSES_PATH = "data/interim/medcasereasoning/formatted_diagnoses_test.jsonl"
+OUTPUT_PATH = "data/semi_processed/medcasemcq/eval/test_with_distractors.jsonl"
+FORMATTED_DIAGNOSES_PATH = "data/semi_processed/medcasemcq/eval/formatted_diagnoses_test.jsonl"
 
 def patch_missing_cases():
     if not MANUAL_PATCHES:

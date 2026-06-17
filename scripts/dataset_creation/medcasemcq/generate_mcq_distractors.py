@@ -4,15 +4,14 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datasets import load_dataset
-from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
 
 DATASET = "zou-lab/MedCaseReasoning"
-SPLIT = "val"
-MODEL_NAME = "Qwen/Qwen3-32B-AWQ"
-DEFAULT_OUTPUT_PATH = "data/interim/medcasereasoning/mcq_dataset_val.jsonl"
-FORMATTED_DIAGNOSES_PATH = "data/interim/medcasereasoning/formatted_diagnoses_val.jsonl"
+DEFAULT_SPLIT = "val"
+MODEL_NAME = "Qwen/Qwen3-32B"
+DEFAULT_OUTPUT_PATH = "data/semi_processed/medcasemcq/fewshot/val_with_distractors.jsonl"
+DEFAULT_FORMATTED_DIAGNOSES_PATH = "data/semi_processed/medcasemcq/fewshot/formatted_diagnoses_val.jsonl"
 MAX_RETRIES = 3
 TEMPERATURE_SCHEDULE = [0.7, 0.5, 0.3]
 NUM_GPUS = 2
@@ -49,11 +48,11 @@ def normalize_text(text: str) -> str:
 
 def extract_json(text: str) -> Optional[Dict[str, object]]:
     text_without_thoughts = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    
+
     match = re.search(r"\{.*\}", text_without_thoughts, flags=re.DOTALL)
     if not match:
         return None
-    
+
     try:
         return json.loads(match.group(0))
     except json.JSONDecodeError:
@@ -121,63 +120,62 @@ def build_user_prompt(
     )
 
 
-def generate_distractors_for_case(
-    llm: LLM,
-    case_prompt: str,
-    diagnostic_reasoning: str,
-    final_diagnosis: str,
-) -> Tuple[Optional[List[str]], Optional[str]]:
-    previous_failure = None
+def process_batch(llm: LLM, records: List[dict], attempt: int) -> Tuple[List[dict], List[dict]]:
+    temperature = TEMPERATURE_SCHEDULE[attempt - 1]
+    sampling_params = SamplingParams(temperature=temperature, max_tokens=512)
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        temperature = TEMPERATURE_SCHEDULE[attempt - 1]
-        sampling_params = SamplingParams(temperature=temperature, max_tokens=512)
-
+    messages = []
+    for row in records:
         prompt = build_user_prompt(
-            case_prompt=case_prompt,
-            diagnostic_reasoning=diagnostic_reasoning,
-            final_diagnosis=final_diagnosis,
+            case_prompt=row["case_prompt"],
+            diagnostic_reasoning=row["diagnostic_reasoning"],
+            final_diagnosis=row["final_diagnosis"],
             attempt=attempt,
-            previous_failure=previous_failure,
+            previous_failure=row.get("failure_reason"),
         )
+        row["_last_user_prompt"] = prompt
+        messages.append([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ])
 
-        messages = [
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
-        ]
+    outputs = llm.chat(messages, sampling_params=sampling_params)
 
-        output = llm.chat(messages, sampling_params=sampling_params, use_tqdm=False)
-        text = output[0].outputs[0].text
+    successful = []
+    failed = []
 
-        if attempt > 1:
-            print(f"\n[DEBUG - Attempt {attempt}]")
-            print(f"LLM RESPONSE:\n{repr(text)}")
+    for row, output in zip(records, outputs):
+        text = output.outputs[0].text
+        row["_last_llm_output"] = text
 
         payload = extract_json(text)
         if payload is None:
-            previous_failure = "Could not parse a valid JSON object."
+            row["failure_reason"] = "Could not parse a valid JSON object."
+            failed.append(row)
             continue
 
         is_valid, reason, cleaned = validate_and_clean_distractors(
-            final_diagnosis, payload.get("distractors")
+            row["final_diagnosis"], payload.get("distractors")
         )
         if not is_valid:
-            previous_failure = reason
+            row["failure_reason"] = reason
+            failed.append(row)
             continue
 
-        return cleaned, None
+        row["distractors"] = cleaned
+        row.pop("failure_reason", None)
+        row.pop("_last_user_prompt", None)
+        row.pop("_last_llm_output", None)
+        successful.append(row)
 
-    return None, previous_failure
+    return successful, failed
 
 
-def main(limit: Optional[int], output_path: str) -> None:
+def main(limit: Optional[int], split: str, formatted_diagnoses_path: str, output_path: str) -> None:
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Load formatted diagnoses mapping
-    formatted_diagnoses_path = Path(FORMATTED_DIAGNOSES_PATH)
+    formatted_diagnoses_path = Path(formatted_diagnoses_path)
     diagnosis_mapping: Dict[str, str] = {}
     with formatted_diagnoses_path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -186,8 +184,35 @@ def main(limit: Optional[int], output_path: str) -> None:
                 diagnosis_mapping[entry["pmc_id"]] = entry["formatted_diagnosis"]
     print(f"Loaded {len(diagnosis_mapping)} formatted diagnoses from {formatted_diagnoses_path}")
 
-    records = load_dataset(DATASET, split=SPLIT)
-    records = records.select(range(min(limit, len(records)))) if limit else records
+    dataset = load_dataset(DATASET, split=split)
+    if limit:
+        dataset = dataset.select(range(min(limit, len(dataset))))
+
+    records = []
+    skipped_count = 0
+    for row in dataset:
+        case_id = str(row.get("Unnamed: 0", "unknown"))
+        pmc_id = row.get("pmcid", "").strip()
+        case_prompt = row.get("case_prompt", "").strip()
+        final_diagnosis = diagnosis_mapping.get(pmc_id, "").strip()
+        diagnostic_reasoning = row.get("diagnostic_reasoning", "").strip()
+
+        if not case_prompt or not final_diagnosis or not diagnostic_reasoning:
+            skipped_count += 1
+            print(f"Skipping case_id={case_id}: missing required fields.")
+            continue
+
+        records.append({
+            "case_id": case_id,
+            "pmc_id": pmc_id,
+            "article_link": row.get("article_link", ""),
+            "text": row.get("text", ""),
+            "case_prompt": case_prompt,
+            "final_diagnosis": final_diagnosis,
+            "diagnostic_reasoning": diagnostic_reasoning,
+        })
+
+    print(f"Loaded {len(records)} records ({skipped_count} skipped due to missing fields).")
 
     llm = LLM(
         model=MODEL_NAME,
@@ -198,76 +223,49 @@ def main(limit: Optional[int], output_path: str) -> None:
         max_model_len=4096
     )
 
-    success_count = 0
-    skipped_count = 0
-    skipped_case_ids: List[str] = []
+    all_successful = []
+    current_batch = records
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        if not current_batch:
+            break
+        print(f"\n--- Attempt {attempt}/{MAX_RETRIES} (Processing {len(current_batch)} record(s)) ---")
+        success, failed = process_batch(llm, current_batch, attempt)
+        all_successful.extend(success)
+        current_batch = failed
+        print(f"Attempt {attempt}: Success={len(success)}, Failed={len(failed)}")
 
     with out_path.open("w", encoding="utf-8") as handle:
-        progress = tqdm(records, total=len(records), desc="Generating MCQ distractors")
-        for row in progress:
-            case_id = str(row.get("Unnamed: 0", "unknown"))
-            case_prompt = row.get("case_prompt", "").strip()
-            pmc_id = row.get("pmcid", "").strip()
-            final_diagnosis = diagnosis_mapping.get(pmc_id, "").strip()
-            diagnostic_reasoning = row.get("diagnostic_reasoning", "").strip()
-
-            if not case_prompt or not final_diagnosis or not diagnostic_reasoning:
-                skipped_count += 1
-                skipped_case_ids.append(case_id)
-                print(f"Skipping case_id={case_id}: missing required fields.")
-                progress.set_postfix(success=success_count, skipped=skipped_count)
-                continue
-
-            distractors, failure_reason = generate_distractors_for_case(
-                llm=llm,
-                case_prompt=case_prompt,
-                diagnostic_reasoning=diagnostic_reasoning,
-                final_diagnosis=final_diagnosis,
-            )
-
-            if distractors is None:
-                skipped_count += 1
-                skipped_case_ids.append(case_id)
-                print(
-                    f"Skipping case_id={case_id}: failed after {MAX_RETRIES} attempts. "
-                    f"Last failure: {failure_reason}"
-                )
-                progress.set_postfix(success=success_count, skipped=skipped_count)
-                continue
-
+        for row in all_successful:
             record = {
-                "pmc_id": row.get("pmcid", ""),
-                "article_link": row.get("article_link", ""),
-                "text": row.get("text", ""),
-                "case_prompt": case_prompt,
-                "final_diagnosis": final_diagnosis,
-                "distractors": distractors,
-                "diagnostic_reasoning": diagnostic_reasoning,
+                "pmc_id": row["pmc_id"],
+                "article_link": row["article_link"],
+                "text": row["text"],
+                "case_prompt": row["case_prompt"],
+                "final_diagnosis": row["final_diagnosis"],
+                "distractors": row["distractors"],
+                "diagnostic_reasoning": row["diagnostic_reasoning"],
             }
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-            success_count += 1
-            progress.set_postfix(success=success_count, skipped=skipped_count)
 
     print("\nRun complete")
     print(f"Output path: {out_path}")
-    print(f"Successful records: {success_count}")
-    print(f"Skipped records: {skipped_count}")
+    print(f"Successful records: {len(all_successful)}")
+    print(f"Skipped records (missing fields): {skipped_count}")
+    print(f"Failed after {MAX_RETRIES} retries: {len(current_batch)}")
 
-    if skipped_case_ids:
-        print("Skipped case_ids:")
-        for item in skipped_case_ids:
-            print(f"- {item}")
+    if current_batch:
+        print("Failed case_ids:")
+        for row in current_batch:
+            print(f"- {row['case_id']}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate intermediate MCQ dataset from MedCaseReasoning")
     parser.add_argument("--limit", type=int, default=None, help="Number of entries to process")
-    parser.add_argument(
-        "--output_path",
-        type=str,
-        default=DEFAULT_OUTPUT_PATH,
-        help="Path for output JSONL file",
-    )
+    parser.add_argument("--split", type=str, default=DEFAULT_SPLIT, help="HuggingFace dataset split to use")
+    parser.add_argument("--formpath", type=str, default=DEFAULT_FORMATTED_DIAGNOSES_PATH, help="Path to formatted diagnoses JSONL file")
+    parser.add_argument("--outpath", type=str, default=DEFAULT_OUTPUT_PATH, help="Path for output JSONL file")
 
     args = parser.parse_args()
-    main(limit=args.limit, output_path=args.output_path)
+    main(limit=args.limit, split=args.split, formatted_diagnoses_path=args.formpath, output_path=args.outpath)

@@ -5,8 +5,6 @@ source:
 
 schema: "MCQSample"
 
-preprocess_script: "scripts/dataset_creation/medcasemcq/preprocess.py"
-
 mapping:
   id: "id"
   question: "question"
