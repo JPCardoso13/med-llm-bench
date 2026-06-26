@@ -5,7 +5,7 @@ FROM ubuntu:22.04
 WORKDIR /app
 
 # System dependencies
-RUN apt-get update && apt-get install -y python3-pip git libnvidia-ml1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y python3-pip git && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
 RUN pip3 install --no-cache-dir --upgrade pip
