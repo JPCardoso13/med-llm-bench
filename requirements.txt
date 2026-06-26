@@ -3,5 +3,6 @@ accelerate
 requests
 pydantic
 datasets
-openai
+openai<2.0.0
+prometheus-fastapi-instrumentator!=8.0.0
 jinja2

@@ -2,8 +2,8 @@ name: qwen3_6_35b_a3b
 engine: vllm
 model_id: Qwen/Qwen3.6-35B-A3B
 backend_api: openai_compatible
-tensor_parallel_size: 1
-max_model_len: 8192
+tensor_parallel_size: 2
+max_model_len: 4096
 gpu_memory_utilization: 0.85
 enforce_eager: false
 trust_remote_code: true

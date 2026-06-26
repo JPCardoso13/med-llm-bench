@@ -58,11 +58,13 @@ def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[
     max_model_len = int(model_cfg.get("max_model_len", 8192))
     gpu_mem_util = float(model_cfg.get("gpu_memory_utilization", 0.8))
 
+    launcher = str(Path(__file__).parent / "vllm_launcher.py")
     cmd = [
         "python3",
-        "-m",
-        "vllm.entrypoints.openai.api_server",
+        launcher,
         "--model",
+        model_id,
+        "--served-model-name",
         model_id,
         "--host",
         "0.0.0.0",
@@ -119,12 +121,14 @@ def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path
     cmd = _build_cmd(model_cfg, port, distributed)
     log_path = logs_dir / f"vllm_{model_cfg.get('name','model')}_{mode}.log"
 
+    env = os.environ.copy()
+
     with open(log_path, "w", encoding="utf-8") as lf:
         process = subprocess.Popen(
             cmd,
             stdout=lf,
             stderr=subprocess.STDOUT,
-            env=os.environ.copy(),
+            env=env,
             start_new_session=True,
         )
 
