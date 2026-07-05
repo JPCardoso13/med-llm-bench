@@ -8,13 +8,13 @@ enabled: true
 
 extraction:
   enabled: true
-  type: sections
   final_answer:
-    type: regex
     pattern: (?is)final\s*answer[:\-\s]*(.*?)(?=\n\s*explanation\s*[:\-]|$)
     trim: true
+    # If the model bleeds an unlabeled "Explanation:" into the final-answer
+    # capture, cut it there and flag the sample as contaminated.
+    contamination_markers: [explanation]
   explanation:
-    type: regex
     pattern: (?is)explanation[:\-\s]*(.*)$
     trim: true
 

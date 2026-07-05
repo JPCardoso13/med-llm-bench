@@ -6,9 +6,18 @@ task_type: mcq
 
 enabled: true
 
+# Ordered regex patterns tried against the (think-block-stripped) response;
+# each must capture the answer letter in group 1. Every match across every
+# pattern contributes a candidate - more than one distinct letter found makes
+# the sample "ambiguous", none found makes it "missing". No patterns
+# configured means no extraction is attempted - there is no built-in fallback.
 extraction:
   enabled: true
-  type: none
+  answer_patterns:
+    - 'final\s+answer\s*[:\-]?\s*\(?\s*([A-J])\s*\)?'
+    - 'answer\s*[:\-]?\s*\(?\s*([A-J])\s*\)?'
+    - 'option\s*[:\-]?\s*\(?\s*([A-J])\s*\)?'
+    - '^\s*\(?\s*([A-J])\s*\)?\s*$'
 
 reporting:
   enabled: true
@@ -23,15 +32,13 @@ mcq:
   enabled: true
   accuracy:
     enabled: true
+  # Averaging is hard-coded to macro in the calculator; not configurable today.
   precision:
     enabled: true
-    average: macro
   recall:
     enabled: true
-    average: macro
   f1:
     enabled: true
-    average: macro
   parsing:
     enabled: true
 

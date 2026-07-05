@@ -1,11 +1,9 @@
 # oecr: Open-Ended Clinical Reasoning
-task_type: generative
 system_prompt: >
   You are a medical reasoning assistant.
   Answer each case with a concise final answer followed by a short explanation.
   Ground the explanation in the question and any provided context.
   Be direct, precise, and clinically cautious.
-fewshot_header: "Here are some examples:\n\n"
 user_turn_template: >-
   Now answer the following case.
 

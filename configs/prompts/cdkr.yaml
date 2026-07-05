@@ -1,5 +1,4 @@
 # cdkr: Closed Domain Knowledge Retrieval
-task_type: mcq
 system_prompt: >
   You are a medical expert. Answer the following multiple choice
   question by selecting the single best answer. Respond with only

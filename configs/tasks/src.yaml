@@ -1,0 +1,30 @@
+schema_version: 1
+
+task_id: src
+task_type: generative
+
+prompt:
+  config: configs/prompts/src.yaml
+
+datasets:
+  - name: pubmedsum
+    config: configs/datasets/pubmedsum.yaml
+    enabled: true
+    eval_limit: 10
+
+  - name: multiclinsum
+    config: configs/datasets/multiclinsum.yaml
+    enabled: true
+    eval_limit: 10
+
+execution:
+  num_fewshot: 0
+  flush_every: 10
+  max_tokens: 512
+
+runtime:
+  telemetry_config: configs/runtime/telemetry.auto.yaml
+
+metrics:
+  systems_profile: configs/metrics/systems.yaml
+  cognitive_profile: configs/metrics/cognitive.generative.summarization.yaml

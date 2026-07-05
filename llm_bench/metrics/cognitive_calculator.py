@@ -5,6 +5,8 @@ import re
 import string
 from typing import Any, Mapping
 
+from rouge_score import rouge_scorer
+
 from llm_bench.metrics.answer_extraction import extract_mcq_answer_letter
 from llm_bench.metrics.answer_extraction import clean_response_text
 from llm_bench.metrics.stats import aggregate_values
@@ -132,13 +134,31 @@ def _summarize_generative_group(
         return {}
 
     exact_match_cfg = generative_cfg.get("exact_match", {})
+    exact_match_enabled = bool(exact_match_cfg.get("enabled", True))
+
     answer_token_f1_cfg = generative_cfg.get("answer_token_f1", {})
+    answer_token_f1_enabled = bool(answer_token_f1_cfg.get("enabled", True))
+
+    rouge_cfg = generative_cfg.get("rouge", {})
+    rouge_enabled = bool(rouge_cfg.get("enabled", False))
+    rouge_variants = list(rouge_cfg.get("variants", ["rouge1", "rouge2", "rougeL"]))
+    rouge_scorer_instance = (
+        rouge_scorer.RougeScorer(rouge_variants, use_stemmer=bool(rouge_cfg.get("use_stemmer", True)))
+        if rouge_enabled
+        else None
+    )
+
+    similarity_cfg = profile.get("similarity", {})
+    similarity_enabled = bool(similarity_cfg.get("enabled", True))
+    expl_token_f1_cfg = similarity_cfg.get("token_f1", {})
+    expl_token_f1_enabled = similarity_enabled and bool(expl_token_f1_cfg.get("enabled", True))
+
     reporting_cfg = profile.get("reporting", {})
-    expl_token_f1_cfg = profile.get("similarity", {}).get("token_f1", {})
 
     answer_exact_scores: list[float] = []
     answer_token_f1_scores: list[float] = []
     explanation_token_f1_scores: list[float] = []
+    rouge_scores: dict[str, list[float]] = {variant: [] for variant in rouge_variants}
 
     evaluated_count = 0
     parsed_count = 0
@@ -196,26 +216,44 @@ def _summarize_generative_group(
         if answer_contaminated:
             contaminated_count += 1
 
-        answer_exact = (
-            1.0 if _normalize_text(predicted_answer, exact_match_cfg) == _normalize_text(ref_answer, exact_match_cfg) else 0.0
-        )
-        answer_f1 = _token_f1_score(
-            _normalize_text(predicted_answer, answer_token_f1_cfg),
-            _normalize_text(ref_answer, answer_token_f1_cfg),
-        )
+        answer_exact = None
+        if exact_match_enabled:
+            answer_exact = (
+                1.0 if _normalize_text(predicted_answer, exact_match_cfg) == _normalize_text(ref_answer, exact_match_cfg) else 0.0
+            )
+            answer_exact_scores.append(answer_exact)
 
-        answer_exact_scores.append(answer_exact)
-        answer_token_f1_scores.append(answer_f1)
+        answer_f1 = None
+        if answer_token_f1_enabled:
+            answer_f1 = _token_f1_score(
+                _normalize_text(predicted_answer, answer_token_f1_cfg),
+                _normalize_text(ref_answer, answer_token_f1_cfg),
+            )
+            answer_token_f1_scores.append(answer_f1)
+
+        sample_rouge: dict[str, float] = {}
+        if rouge_scorer_instance is not None:
+            rouge_result = rouge_scorer_instance.score(ref_answer, predicted_answer)
+            for variant in rouge_variants:
+                sample_rouge[variant] = rouge_result[variant].fmeasure
+                rouge_scores[variant].append(sample_rouge[variant])
 
         explanation_token_f1 = None
-        if ref_reasoning and predicted_explanation:
+        if expl_token_f1_enabled and ref_reasoning and predicted_explanation:
             explanation_token_f1 = _token_f1_score(
                 _normalize_text(predicted_explanation, expl_token_f1_cfg),
                 _normalize_text(ref_reasoning, expl_token_f1_cfg),
             )
             explanation_token_f1_scores.append(explanation_token_f1)
 
-        composite_score = 0.5 * answer_exact + 0.5 * answer_f1
+        composite_parts = [score for score in (answer_exact, answer_f1) if score is not None]
+        if composite_parts:
+            composite_score = sum(composite_parts) / len(composite_parts)
+        elif sample_rouge:
+            composite_score = sum(sample_rouge.values()) / len(sample_rouge)
+        else:
+            composite_score = 0.0
+
         per_sample_rows.append(
             {
                 "sample_id": result.sample_id,
@@ -223,6 +261,7 @@ def _summarize_generative_group(
                 "status": "ok",
                 "answer_exact": answer_exact,
                 "answer_token_f1": answer_f1,
+                "rouge": sample_rouge or None,
                 "format_ok": not answer_contaminated,
                 "answer_contaminated": answer_contaminated,
                 "explanation_token_f1": explanation_token_f1,
@@ -234,21 +273,6 @@ def _summarize_generative_group(
             }
         )
 
-    answer_exact_summary = aggregate_values(answer_exact_scores, ["mean", "min", "max"])
-    answer_token_f1_summary = aggregate_values(answer_token_f1_scores, ["mean", "min", "max"])
-    explanation_token_f1_summary = aggregate_values(explanation_token_f1_scores, ["mean", "min", "max"])
-
-    answer_exact_summary["correct_count"] = int(sum(answer_exact_scores))
-    answer_exact_summary["evaluated_count"] = len(answer_exact_scores)
-    answer_exact_summary["accuracy"] = (
-        answer_exact_summary["correct_count"] / answer_exact_summary["evaluated_count"]
-        if answer_exact_summary["evaluated_count"] > 0
-        else None
-    )
-
-    answer_token_f1_summary["evaluated_count"] = len(answer_token_f1_scores)
-    explanation_token_f1_summary["evaluated_count"] = len(explanation_token_f1_scores)
-
     format_summary = {
         "parse_success_count": parsed_count,
         "parse_failure_count": len(parse_failures),
@@ -257,19 +281,46 @@ def _summarize_generative_group(
         "answer_clean_rate": (1.0 - (contaminated_count / parsed_count)) if parsed_count > 0 else None,
     }
 
+    answer_metrics: dict[str, Any] = {}
+
+    if exact_match_enabled:
+        answer_exact_summary = aggregate_values(answer_exact_scores, ["mean", "min", "max"])
+        answer_exact_summary["correct_count"] = int(sum(answer_exact_scores))
+        answer_exact_summary["evaluated_count"] = len(answer_exact_scores)
+        answer_exact_summary["accuracy"] = (
+            answer_exact_summary["correct_count"] / answer_exact_summary["evaluated_count"]
+            if answer_exact_summary["evaluated_count"] > 0
+            else None
+        )
+        answer_metrics["exact_match"] = answer_exact_summary
+
+    if answer_token_f1_enabled:
+        answer_token_f1_summary = aggregate_values(answer_token_f1_scores, ["mean", "min", "max"])
+        answer_token_f1_summary["evaluated_count"] = len(answer_token_f1_scores)
+        answer_metrics["token_f1"] = answer_token_f1_summary
+
+    metrics_summary: dict[str, Any] = {
+        "answer": answer_metrics,
+        "format": format_summary,
+    }
+
+    if rouge_scorer_instance is not None:
+        rouge_summary: dict[str, Any] = {}
+        for variant, scores in rouge_scores.items():
+            variant_summary = aggregate_values(scores, ["mean", "min", "max"])
+            variant_summary["evaluated_count"] = len(scores)
+            rouge_summary[variant] = variant_summary
+        metrics_summary["rouge"] = rouge_summary
+
+    if expl_token_f1_enabled:
+        explanation_token_f1_summary = aggregate_values(explanation_token_f1_scores, ["mean", "min", "max"])
+        explanation_token_f1_summary["evaluated_count"] = len(explanation_token_f1_scores)
+        metrics_summary["explanation"] = {"token_f1": explanation_token_f1_summary}
+
     summary = {
         "dataset": dataset,
         "sample_count": len(results),
-        "metrics": {
-            "answer": {
-                "exact_match": answer_exact_summary,
-                "token_f1": answer_token_f1_summary,
-            },
-            "format": format_summary,
-            "explanation": {
-                "token_f1": explanation_token_f1_summary,
-            },
-        },
+        "metrics": metrics_summary,
     }
 
     diagnostics = _build_generative_diagnostics(per_sample_rows, reporting_cfg)
@@ -324,9 +375,12 @@ def _safe_preview(value: str | None, cfg: Mapping[str, Any]) -> str:
 def _extract_generative_response(response: str, profile: Mapping[str, Any]) -> dict[str, Any]:
     cleaned = clean_response_text(response)
     extraction_cfg = profile.get("extraction", {})
-    final_answer = _extract_section(cleaned, extraction_cfg.get("final_answer", {}), fallback_label="final answer")
-    explanation = _extract_section(cleaned, extraction_cfg.get("explanation", {}), fallback_label="explanation")
-    final_answer, answer_contaminated = _normalize_final_answer(final_answer)
+    final_answer_cfg = extraction_cfg.get("final_answer", {})
+    final_answer = _extract_section(cleaned, final_answer_cfg)
+    explanation = _extract_section(cleaned, extraction_cfg.get("explanation", {}))
+    on_multiline = str(final_answer_cfg.get("on_multiline", "truncate_first_line"))
+    contamination_markers = list(final_answer_cfg.get("contamination_markers", []))
+    final_answer, answer_contaminated = _normalize_final_answer(final_answer, on_multiline, contamination_markers)
     return {
         "final_answer": final_answer,
         "explanation": explanation,
@@ -334,18 +388,10 @@ def _extract_generative_response(response: str, profile: Mapping[str, Any]) -> d
     }
 
 
-def _extract_section(text: str, section_cfg: Mapping[str, Any], fallback_label: str) -> str | None:
+def _extract_section(text: str, section_cfg: Mapping[str, Any]) -> str | None:
+    # No pattern configured means no extraction is attempted for this section -
+    # there is no built-in fallback guess.
     value = _extract_by_regex(text, section_cfg.get("pattern"))
-    if value is None:
-        if fallback_label == "final answer":
-            value = _extract_by_regex(
-                text,
-                rf"(?is){re.escape(fallback_label)}\s*[:\-\s]*(.*?)(?=\n\s*explanation\s*[:\-]|\bexplanation\s*[:\-]|$)",
-            )
-            if value is None:
-                value = _extract_by_regex(text, rf"(?is){re.escape(fallback_label)}\s*[:\-\s]*(.*)$")
-        else:
-            value = _extract_by_regex(text, rf"(?is){re.escape(fallback_label)}\s*[:\-\s]*(.*)$")
     if value is None:
         return None
     if section_cfg.get("trim", True):
@@ -353,21 +399,35 @@ def _extract_section(text: str, section_cfg: Mapping[str, Any], fallback_label: 
     return value or None
 
 
-def _normalize_final_answer(final_answer: str | None) -> tuple[str | None, bool]:
+def _normalize_final_answer(
+    final_answer: str | None,
+    on_multiline: str = "truncate_first_line",
+    contamination_markers: list[str] | None = None,
+) -> tuple[str | None, bool]:
     if final_answer is None:
         return None, False
 
     value = str(final_answer).strip()
     contaminated = False
 
-    explanation_marker = re.search(r"(?is)\bexplanation\s*[:\-]", value)
-    if explanation_marker:
+    earliest_marker_match = None
+    for marker in contamination_markers or []:
+        marker_match = re.search(rf"(?is)\b{re.escape(marker)}\s*[:\-]", value)
+        if marker_match and (earliest_marker_match is None or marker_match.start() < earliest_marker_match.start()):
+            earliest_marker_match = marker_match
+
+    if earliest_marker_match:
         contaminated = True
-        value = value[: explanation_marker.start()].strip()
+        value = value[: earliest_marker_match.start()].strip()
 
     if "\n" in value:
         contaminated = True
-        value = value.splitlines()[0].strip()
+        if on_multiline == "join":
+            # Long-form answers (e.g. summaries) span multiple lines legitimately;
+            # join instead of discarding everything past the first line.
+            value = " ".join(line.strip() for line in value.splitlines() if line.strip())
+        else:
+            value = value.splitlines()[0].strip()
 
     value = value.strip().rstrip(". ")
     return (value or None), contaminated
@@ -441,6 +501,8 @@ def _summarize_mcq_group(
     enable_recall = bool(mcq_cfg.get("recall", {}).get("enabled", True))
     enable_f1 = bool(mcq_cfg.get("f1", {}).get("enabled", True))
     enable_parsing = bool(mcq_cfg.get("parsing", {}).get("enabled", True))
+    reporting_cfg = profile.get("reporting", {})
+    answer_patterns = list(profile.get("extraction", {}).get("answer_patterns", []))
 
     evaluated_count = 0
     correct_count = 0
@@ -448,6 +510,7 @@ def _summarize_mcq_group(
     parse_failure_count = 0
     ambiguous_count = 0
     label_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0})
+    per_sample_rows: list[dict[str, Any]] = []
 
     for result in results:
         ref_answer = str(result.ref_fields.get("answer_idx", "")).strip().upper()
@@ -459,9 +522,17 @@ def _summarize_mcq_group(
                     "field": "ref_fields.answer_idx",
                 }
             )
+            per_sample_rows.append(
+                {
+                    "sample_id": result.sample_id,
+                    "dataset": dataset,
+                    "status": "missing_ref_fields",
+                    "missing_fields": ["ref_fields.answer_idx"],
+                }
+            )
             continue
 
-        extraction = extract_mcq_answer_letter(result.response)
+        extraction = extract_mcq_answer_letter(result.response, answer_patterns)
         status = extraction["status"]
         pred = extraction["letter"]
 
@@ -492,13 +563,27 @@ def _summarize_mcq_group(
         if pred is not None:
             label_stats.setdefault(pred, {"tp": 0, "fp": 0, "fn": 0})
 
-        if pred is not None and pred == ref_answer:
+        is_correct = pred is not None and pred == ref_answer
+        if is_correct:
             correct_count += 1
             label_stats[ref_answer]["tp"] += 1
         else:
             label_stats[ref_answer]["fn"] += 1
             if pred is not None:
                 label_stats[pred]["fp"] += 1
+
+        per_sample_rows.append(
+            {
+                "sample_id": result.sample_id,
+                "dataset": dataset,
+                "status": "ok",
+                "correct": is_correct,
+                "parse_status": status,
+                "predicted_letter": pred,
+                "reference_letter": ref_answer,
+                "response_preview": _safe_preview(result.response, reporting_cfg),
+            }
+        )
 
     summary: dict[str, Any] = {}
 
@@ -529,7 +614,41 @@ def _summarize_mcq_group(
             "parse_success_rate": (parsed_success_count / evaluated_count) if evaluated_count > 0 else None,
         }
 
+    diagnostics = _build_mcq_diagnostics(per_sample_rows, reporting_cfg)
+    if diagnostics:
+        summary["diagnostics"] = diagnostics
+
     return summary
+
+
+def _build_mcq_diagnostics(rows: list[dict[str, Any]], cfg: Mapping[str, Any]) -> dict[str, Any]:
+    if not cfg.get("enabled", False):
+        return {}
+
+    top_k_worst = int(cfg.get("top_k_worst", 20))
+    top_k_best = int(cfg.get("top_k_best", 5))
+    include_per_sample = bool(cfg.get("include_per_sample", False))
+    per_sample_limit = int(cfg.get("per_sample_limit", 1000))
+
+    ok_rows = [row for row in rows if row.get("status") == "ok"]
+    # Incorrect (including unparseable) sorts first - that's what's worth eyeballing.
+    sorted_ok = sorted(ok_rows, key=lambda row: float(bool(row.get("correct"))))
+
+    diagnostics: dict[str, Any] = {
+        "configured": {
+            "top_k_worst": top_k_worst,
+            "top_k_best": top_k_best,
+            "include_per_sample": include_per_sample,
+            "per_sample_limit": per_sample_limit,
+        },
+        "worst_samples": sorted_ok[: max(0, top_k_worst)],
+        "best_samples": list(reversed(sorted_ok[-max(0, top_k_best):])) if top_k_best > 0 else [],
+    }
+
+    if include_per_sample:
+        diagnostics["per_sample"] = rows[: max(0, per_sample_limit)]
+
+    return diagnostics
 
 
 def _build_mcq_classification_summary(label_stats: Mapping[str, Mapping[str, int]]) -> dict[str, Any]:

@@ -16,3 +16,5 @@ logs/
 outputs/
 
 *.egg-info/
+
+/med-llm-bench_sandbox

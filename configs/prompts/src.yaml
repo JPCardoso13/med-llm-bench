@@ -1,0 +1,18 @@
+# src: Summarization and Reading Comprehension
+system_prompt: >
+  You are a biomedical summarization assistant.
+  Read the provided document and write a concise, faithful summary of its key
+  clinical or scientific content. Preserve clinically or scientifically
+  important details; omit redundant or irrelevant information.
+  Respond with the summary as a single unbroken paragraph: no line breaks, no
+  bullet points, no headers, and no commentary other than the summary itself.
+user_turn_template: >-
+  Summarize the following document.
+
+  Document: {{ question }}
+
+  Summary:
+fewshot_template: >-
+  Document: {{ question }}
+
+  Summary: {{ answer }}

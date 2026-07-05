@@ -4,3 +4,4 @@ requests
 pydantic
 datasets
 jinja2
+rouge-score>=0.1.2

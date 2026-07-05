@@ -20,25 +20,39 @@ mcq:
     enabled: true
     # Track when answer extraction fails or is ambiguous
 
-# Generative-specific metrics (omit for MCQ tasks).
+# Generative-specific metrics (omit for MCQ tasks). All implemented and
+# individually gateable - set enabled: false on any block to skip it.
 # generative:
 #   enabled: true
 #   exact_match:
 #     enabled: true
-#     case_sensitive: false
-#   bleu:
-#     enabled: false
-#     max_order: 4
+#     lowercase: true
+#     normalize_whitespace: true
+#     strip_punctuation: true
+#   answer_token_f1:
+#     enabled: true
+#     lowercase: true
+#     normalize_whitespace: true
+#     strip_punctuation: true
 #   rouge:
 #     enabled: false
-#     variants: [L, 1, 2]
+#     variants: [rouge1, rouge2, rougeL]
+#     use_stemmer: true
 
-# Reusable across task types.
-semantic_similarity:
-  enabled: false
-  # Requires bertscore dependency; compute reference vs prediction similarity.
-  # metric_name: bertscore
-  # language: en
+# extraction.final_answer.on_multiline controls what happens when the
+# extracted final answer spans multiple lines:
+#   truncate_first_line (default) - keep only the first line, flag as
+#     contaminated. Suits short QA-style final answers where extra lines
+#     usually mean unlabeled explanation bleed-through.
+#   join - join all lines with a space, still flagged as contaminated for
+#     diagnostics. Suits long-form answers (e.g. summaries) where multiple
+#     lines are legitimate content, not a parsing failure.
+
+# Not implemented yet - requires a bertscore dependency.
+# semantic_similarity:
+#   enabled: false
+#   metric_name: bertscore
+#   language: en
 
 # LLM-as-a-judge (future).
 llm_judge:

@@ -7,14 +7,6 @@ from typing import Any
 _THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 _THINK_TAIL_PATTERN = re.compile(r"<think>.*$", re.IGNORECASE | re.DOTALL)
 
-# Ordered patterns from most explicit to most permissive.
-_ANSWER_PATTERNS = [
-    re.compile(r"final\s+answer\s*[:\-]?\s*\(?\s*([A-J])\s*\)?", re.IGNORECASE),
-    re.compile(r"answer\s*[:\-]?\s*\(?\s*([A-J])\s*\)?", re.IGNORECASE),
-    re.compile(r"option\s*[:\-]?\s*\(?\s*([A-J])\s*\)?", re.IGNORECASE),
-    re.compile(r"^\s*\(?\s*([A-J])\s*\)?\s*$", re.IGNORECASE | re.MULTILINE),
-]
-
 
 def clean_response_text(text: str) -> str:
     """Remove think blocks and normalize whitespace for extraction."""
@@ -23,8 +15,16 @@ def clean_response_text(text: str) -> str:
     return cleaned.strip()
 
 
-def extract_mcq_answer_letter(text: str) -> dict[str, Any]:
-    """Extract MCQ answer letter from model output.
+def extract_mcq_answer_letter(text: str, patterns: list[str]) -> dict[str, Any]:
+    """Extract MCQ answer letter from model output using caller-supplied patterns.
+
+    Args:
+        text: raw model response.
+        patterns: ordered regex patterns, each capturing the answer letter in
+            group 1 (or matching the bare letter via group 0). Tried in order;
+            every match across every pattern contributes a candidate. An empty
+            list means no extraction is attempted - there is no built-in
+            fallback pattern set.
 
     Returns a dictionary with:
     - letter: extracted answer letter or None
@@ -37,8 +37,8 @@ def extract_mcq_answer_letter(text: str) -> dict[str, Any]:
     candidates: list[str] = []
     seen: set[str] = set()
 
-    for pattern in _ANSWER_PATTERNS:
-        for match in pattern.findall(cleaned):
+    for pattern in patterns:
+        for match in re.findall(pattern, cleaned, re.IGNORECASE | re.MULTILINE):
             letter = str(match).upper()
             if letter not in seen:
                 seen.add(letter)

@@ -1,0 +1,66 @@
+schema_version: 1
+
+profile_id: cognitive.generative.summarization
+scope: cognitive
+task_type: generative
+
+enabled: true
+
+# Single "Summary:" section per response. No final_answer/explanation split,
+# since plain summaries don't have that structure.
+extraction:
+  enabled: true
+  final_answer:
+    pattern: (?is)summary[:\-\s]*(.*)$
+    trim: true
+    # A multi-sentence summary spanning several lines is expected output here
+    # (unlike a short QA final-answer) - join lines instead of truncating to
+    # the first one so multi-line responses aren't scored on a fragment.
+    on_multiline: join
+
+reporting:
+  enabled: true
+  top_k_worst: 20
+  top_k_best: 5
+  include_per_sample: false
+  per_sample_limit: 1000
+  include_text_preview: true
+  text_preview_chars: 300
+
+mcq:
+  enabled: false
+
+generative:
+  enabled: true
+  # Exact match on a full free-text summary is meaningless (will sit at ~0%
+  # unless the model copies the reference verbatim) - disabled.
+  exact_match:
+    enabled: false
+  # Unigram token-overlap F1; useful as a cheap sanity signal but no credit
+  # for paraphrase/synonyms and no sequence-order sensitivity. ROUGE below is
+  # the primary early-stage quality metric for this task.
+  answer_token_f1:
+    enabled: true
+    target: answer
+    lowercase: true
+    normalize_whitespace: true
+    strip_punctuation: true
+  rouge:
+    enabled: true
+    variants: [rouge1, rouge2, rougeL]
+    use_stemmer: true
+    target: answer
+
+# No ref_reasoning/explanation field for this task; left disabled.
+similarity:
+  enabled: false
+
+# Not implemented in the framework yet.
+llm_judge:
+  enabled: false
+  judge_prompt_config: null
+
+quality_checks:
+  fail_on_missing_ref_fields: false
+  warn_on_parse_failures: true
+  warn_on_extraction_ambiguity: true
