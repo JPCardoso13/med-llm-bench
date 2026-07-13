@@ -4,6 +4,9 @@ system_prompt: >
   Answer each case with a concise final answer followed by a short explanation.
   Ground the explanation in the question and any provided context.
   Be direct, precise, and clinically cautious.
+  Always start your response with the literal label "Final answer:" followed
+  by your answer, then on its own line write the literal label "Explanation:"
+  followed by your reasoning. Do not omit either label.
 user_turn_template: >-
   Now answer the following case.
 
@@ -13,6 +16,7 @@ user_turn_template: >-
   {% endif %}
 
   Final answer:
+
   Explanation:
 fewshot_template: >-
   Question: {{ question }}
@@ -21,6 +25,7 @@ fewshot_template: >-
   {% endif %}
 
   Final answer: {{ answer }}
+
   Explanation:
   {% if ref_reasoning %}
   {{ ref_reasoning }}

@@ -32,7 +32,10 @@ execution:
 
 runtime:
   # Runtime telemetry collection config (collector/endpoints/timeouts).
-  telemetry_config: configs/runtime/telemetry.yaml
+  # configs/runtime/telemetry.auto.yaml is generated dynamically per-run by
+  # multi_model_orchestration.sh (or set enabled: false for local runs) -
+  # don't hand-author a static file at this path, point at the auto one.
+  telemetry_config: configs/runtime/telemetry.auto.yaml
 
 metrics:
   # Systems-level metric profile consumed by metrics calculator.

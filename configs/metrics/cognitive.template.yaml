@@ -54,12 +54,17 @@ mcq:
 #   metric_name: bertscore
 #   language: en
 
-# LLM-as-a-judge (future).
+# LLM-as-a-judge: offline pass, run separately via scripts/llm_judge_run.py
+# after the main benchmarking run. rubric items are categorical labels, not
+# numeric scores - see configs/metrics/cognitive.generative.yaml (OECR) and
+# cognitive.generative.summarization.yaml (SRC) for real, working examples.
 llm_judge:
   enabled: false
-  # model_id: null
-  # judge_prompt_config: null
-  # scoring_rubric: null
+  judge_prompt_config: configs/prompts/judge/task_name_judge.yaml
+  rubric:
+    example_item:
+      enabled: true
+      labels: [Poor, Fair, Good, Excellent]
 
 quality_checks:
   fail_on_missing_ref_fields: false

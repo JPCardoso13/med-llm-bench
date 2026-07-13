@@ -26,7 +26,7 @@ from llm_bench.utils.io import save_results_json
 
 
 TASKS_DIR = Path("configs/tasks")
-MODELS_DIR = Path("configs/models")
+MODELS_DIR = Path(os.getenv("MODELS_DIR", "configs/models"))
 PER_DATASET_EVAL_LIMIT = 5
 RAW_RESULTS_DIR = Path("outputs/raw")
 REPORTS_DIR = Path("outputs/reports")

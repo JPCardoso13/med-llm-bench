@@ -734,3 +734,47 @@ def _build_quality_summary(
         "ambiguous_extractions": ambiguous_extractions[:200],
         "missing_ref_fields": missing_ref_fields[:200],
     }
+
+
+def summarize_judge_group(judge_rows: list[Mapping[str, Any]], rubric: Mapping[str, Any]) -> dict[str, Any]:
+    """Aggregate offline LLM-judge verdicts for one dataset group.
+
+    judge_rows: one entry per judged sample, shaped
+    {"sample_id": str, "scores": {rubric_item: label | None}, "parse_ok": bool}.
+    rubric: the profile's llm_judge.rubric block (rubric_item -> {enabled, labels}).
+    """
+    sample_count = len(judge_rows)
+    parse_failure_count = sum(1 for row in judge_rows if not row.get("parse_ok", False))
+
+    items: dict[str, Any] = {}
+    for item_name, item_cfg in rubric.items():
+        if not item_cfg.get("enabled", True):
+            continue
+
+        labels = list(item_cfg.get("labels", []))
+        counts: dict[str, int] = {label: 0 for label in labels}
+        scored_count = 0
+
+        for row in judge_rows:
+            label = row.get("scores", {}).get(item_name)
+            if label is None:
+                continue
+            counts[label] = counts.get(label, 0) + 1
+            scored_count += 1
+
+        items[item_name] = {
+            "labels": labels,
+            "counts": counts,
+            "percentages": {
+                label: (count / scored_count) if scored_count > 0 else None
+                for label, count in counts.items()
+            },
+            "scored_count": scored_count,
+        }
+
+    return {
+        "sample_count": sample_count,
+        "parse_failure_count": parse_failure_count,
+        "parse_success_rate": ((sample_count - parse_failure_count) / sample_count) if sample_count > 0 else None,
+        "items": items,
+    }

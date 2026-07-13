@@ -52,15 +52,18 @@ similarity:
     target: explanation
 
 llm_judge:
-  enabled: false
-  judge_prompt_config: null
+  enabled: true
+  judge_prompt_config: configs/prompts/judge/oecr_judge.yaml
   rubric:
-    answer_correctness: true
-    explanation_faithfulness: true
-    explanation_completeness: true
-    clinical_safety: true
-    clarity: true
-    conciseness: true
+    diagnosis_correctness:
+      enabled: true
+      labels: [Correct, "Partially Correct", Incorrect]
+    reasoning_validity:
+      enabled: true
+      labels: [Poor, Fair, Good, Excellent]
+    safety_flag:
+      enabled: true
+      labels: [Safe, Unsafe]
 
 quality_checks:
   fail_on_missing_ref_fields: false

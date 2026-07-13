@@ -3,7 +3,7 @@
 #SBATCH --gpus=3
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=96
-#SBATCH --time=02:00:00
+#SBATCH --time=02:30:00
 #SBATCH --partition=normal-a100-80
 #SBATCH --account=F202500001HPCVLABEPICUREG
 #SBATCH --output=logs/orchestration/out/multi_model_orchestration_%j.out
@@ -54,6 +54,7 @@ HF_EVICT_BETWEEN_MODELS="${HF_EVICT_BETWEEN_MODELS:-0}"
 
 SERVE_PORT="${SERVE_PORT:-8000}"
 RAY_PORT="${RAY_PORT:-6379}"
+JUDGE_MODEL_CONFIG="${JUDGE_MODEL_CONFIG:-configs/models/judges/medgemma_27b_it_judge.yaml}"
 
 extract_first_int() {
     local value="$1"
@@ -119,7 +120,7 @@ export SINGULARITYENV_SERVE_PORT="$SERVE_PORT"
 
 singularity_exports="ALL,SINGULARITYENV_HF_HOME=$HF_HOME,SINGULARITYENV_HUGGINGFACE_HUB_CACHE=$HF_HOME/hub,SINGULARITYENV_HF_HUB_OFFLINE=$HF_HUB_OFFLINE,SINGULARITYENV_TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE,SINGULARITYENV_HF_DATASETS_OFFLINE=$HF_DATASETS_OFFLINE,SINGULARITYENV_HF_OFFLINE=$HF_OFFLINE,SINGULARITYENV_HF_EVICT_BETWEEN_MODELS=$HF_EVICT_BETWEEN_MODELS,SINGULARITYENV_PYTHONPATH=$WORKDIR${PYTHONPATH:+:$PYTHONPATH},SINGULARITYENV_LLM_API_KEY=${LLM_API_KEY:-EMPTY},SINGULARITYENV_LLM_BENCH_RUNTIME_CONFIG=configs/runtime/telemetry.auto.yaml,SINGULARITYENV_LLM_MAX_TOKENS_DEFAULT=1024,SINGULARITYENV_LLM_NODE_COUNT=$node_count,SINGULARITYENV_SERVE_PORT=$SERVE_PORT"
 
-mkdir -p logs/orchestration/out logs/orchestration/err logs/vllm outputs/reports outputs/raw
+mkdir -p logs/orchestration/out logs/orchestration/err logs/vllm outputs/reports outputs/raw outputs/judged
 
 echo "Job $SLURM_JOB_ID on node $(hostname), nodes=${node_count}, gpus_per_node=${gpus_per_node}"
 
@@ -201,5 +202,20 @@ srun --overlap --nodes=1 --ntasks=1 \
 EXIT_CODE=$?
 
 echo "Orchestrator exited with code: $EXIT_CODE"
+
+if [[ "$EXIT_CODE" -eq 0 ]]; then
+    echo "Running LLM-as-judge pass: $JUDGE_MODEL_CONFIG"
+
+    srun --overlap --nodes=1 --ntasks=1 \
+        --export="${singularity_exports}" \
+        "$SINGULARITY_BIN" exec --nv --env-file .env "$SIF" \
+        python3 -u scripts/llm_judge_run.py --judge-model "$JUDGE_MODEL_CONFIG"
+
+    JUDGE_EXIT_CODE=$?
+    echo "Judge pass exited with code: $JUDGE_EXIT_CODE"
+    EXIT_CODE=$JUDGE_EXIT_CODE
+else
+    echo "Skipping LLM-as-judge pass: orchestrator did not exit cleanly"
+fi
 
 exit $EXIT_CODE

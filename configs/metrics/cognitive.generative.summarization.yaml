@@ -6,12 +6,17 @@ task_type: generative
 
 enabled: true
 
-# Single "Summary:" section per response. No final_answer/explanation split,
-# since plain summaries don't have that structure.
+# The whole response IS the summary, verbatim - no "Summary:" label to key
+# off of. src.yaml's system prompt explicitly instructs "no headers, no
+# commentary other than the summary itself", so a pattern requiring the
+# literal word "summary" (the original version of this pattern) never
+# matched anything and silently dropped every sample from every downstream
+# metric. No final_answer/explanation split either, since plain summaries
+# don't have that structure.
 extraction:
   enabled: true
   final_answer:
-    pattern: (?is)summary[:\-\s]*(.*)$
+    pattern: (?is)^(.*)$
     trim: true
     # A multi-sentence summary spanning several lines is expected output here
     # (unlike a short QA final-answer) - join lines instead of truncating to
@@ -55,10 +60,16 @@ generative:
 similarity:
   enabled: false
 
-# Not implemented in the framework yet.
 llm_judge:
-  enabled: false
-  judge_prompt_config: null
+  enabled: true
+  judge_prompt_config: configs/prompts/judge/src_judge.yaml
+  rubric:
+    coverage:
+      enabled: true
+      labels: [Poor, Fair, Good, Excellent]
+    faithfulness:
+      enabled: true
+      labels: [Poor, Fair, Good, Excellent]
 
 quality_checks:
   fail_on_missing_ref_fields: false
