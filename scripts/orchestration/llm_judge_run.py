@@ -8,8 +8,8 @@ from typing import Any
 
 from tqdm import tqdm
 
-from vllm_manager import start_vllm, stop_vllm
-from multi_model_orchestrator import (
+from scripts.vllm.vllm_manager import start_vllm, stop_vllm
+from scripts.orchestration.orchestrator import (
     RAW_RESULTS_DIR,
     REPORTS_DIR,
     SERVE_LOG_DIR,

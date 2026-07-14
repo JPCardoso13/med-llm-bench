@@ -1,12 +1,14 @@
 #!/bin/bash
+#SBATCH --job-name=download_hf_assets
+#SBATCH --partition=normal-a100-80
+#SBATCH --account=F202500001HPCVLABEPICUREG
 #SBATCH --nodes=1
+#SBATCH --gpus=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --time=02:00:00
-#SBATCH --partition=dev-x86
-#SBATCH --account=F202500001HPCVLABEPICUREX
-#SBATCH --output=logs/hf_download/out/hf_download_%j.out
-#SBATCH --error=logs/hf_download/err/hf_download_%j.err
+#SBATCH --cpus-per-task=32
+#SBATCH --time=02:30:00
+#SBATCH --output=logs/asset_download/out/download_hf_assets_%j.out
+#SBATCH --error=logs/asset_download/err/download_hf_assets_%j.err
 
 set -euo pipefail
 

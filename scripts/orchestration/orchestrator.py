@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from vllm_manager import start_vllm, stop_vllm
+from scripts.vllm.vllm_manager import start_vllm, stop_vllm
 from llm_bench.backends import OpenAIBackend
 from llm_bench.formatters import GenerativeFormatter, MCQFormatter
 from llm_bench.ingestion import YamlLoader

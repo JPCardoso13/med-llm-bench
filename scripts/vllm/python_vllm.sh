@@ -1,13 +1,12 @@
 #!/bin/bash
-#SBATCH --nodes=1
-#SBATCH --gpus=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --time=04:00:00
-#SBATCH --partition=normal-a100-80
-#SBATCH --account=F202500001HPCVLABEPICUREG
-#SBATCH --output=logs/offline_vllm/%j.out
-#SBATCH --error=logs/offline_vllm/%j.err
+#SBATCH --job-name=python_vllm
+#SBATCH --partition=rtx4060
+#SBATCH --account=haslab
+#SBATCH --nodes=2
+#SBATCH --exclude=aurora[04-05]
+#SBATCH --time=02:00:00
+#SBATCH --output=logs/python_vllm/out/python_vllm_%j.out
+#SBATCH --error=logs/python_vllm/err/python_vllm_%j.err
 
 set -euo pipefail
 
@@ -20,7 +19,7 @@ cd "$WORKDIR"
 
 SIF="med-llm-bench.sif"
 export HF_HOME="${HF_HOME:-$WORKDIR/.cache/huggingface}"
-mkdir -p "$HF_HOME" logs/offline_vllm
+mkdir -p "$HF_HOME" logs/vllm_setup
 
 HF_OFFLINE="${HF_OFFLINE:-1}"
 if [[ "$HF_OFFLINE" == "1" ]]; then

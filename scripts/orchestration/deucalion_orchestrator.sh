@@ -1,13 +1,14 @@
 #!/bin/bash
+#SBATCH --job-name=deucalion_orchestrator
+#SBATCH --partition=normal-a100-80
+#SBATCH --account=F202500001HPCVLABEPICUREG
 #SBATCH --nodes=1
 #SBATCH --gpus=3
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=96
 #SBATCH --time=02:30:00
-#SBATCH --partition=normal-a100-80
-#SBATCH --account=F202500001HPCVLABEPICUREG
-#SBATCH --output=logs/orchestration/out/multi_model_orchestration_%j.out
-#SBATCH --error=logs/orchestration/err/multi_model_orchestration_%j.err
+#SBATCH --output=logs/orchestration/out/deucalion_orchestrator_%j.out
+#SBATCH --error=logs/orchestration/err/deucalion_orchestrator_%j.err
 
 # Suggested defaults:
 # - No internet, big storage: HF_OFFLINE=1 HF_CACHE_MODE=persistent HF_EVICT_BETWEEN_MODELS=0
