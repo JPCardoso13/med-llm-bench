@@ -3,7 +3,6 @@
 #SBATCH --partition=rtx4060
 #SBATCH --account=haslab
 #SBATCH --nodes=2
-#SBATCH --exclude=aurora[04-05]
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/python_vllm/out/python_vllm_%j.out
 #SBATCH --error=logs/python_vllm/err/python_vllm_%j.err
