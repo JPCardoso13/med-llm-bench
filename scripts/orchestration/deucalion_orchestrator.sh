@@ -3,9 +3,9 @@
 #SBATCH --partition=normal-a100-80
 #SBATCH --account=F202500001HPCVLABEPICUREG
 #SBATCH --nodes=1
-#SBATCH --gpus=3
+#SBATCH --gpus=4
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=96
+#SBATCH --cpus-per-task=128
 #SBATCH --time=02:30:00
 #SBATCH --output=logs/orchestration/out/deucalion_orchestrator_%j.out
 #SBATCH --error=logs/orchestration/err/deucalion_orchestrator_%j.err
@@ -192,7 +192,7 @@ done
 echo "Telemetry endpoints configured: ${#TELEMETRY_ENDPOINTS[@]} node(s)"
 echo "Cache mode: ${HF_CACHE_MODE} | HF_HOME=${HF_HOME} | Offline=${HF_OFFLINE}"
 
-python_script="scripts/multi_model_orchestrator.py"
+python_script="scripts/orchestration/orchestrator.py"
 echo "Running orchestrator: $python_script"
 
 srun --overlap --nodes=1 --ntasks=1 \
@@ -210,7 +210,7 @@ if [[ "$EXIT_CODE" -eq 0 ]]; then
     srun --overlap --nodes=1 --ntasks=1 \
         --export="${singularity_exports}" \
         "$SINGULARITY_BIN" exec --nv --env-file .env "$SIF" \
-        python3 -u scripts/llm_judge_run.py --judge-model "$JUDGE_MODEL_CONFIG"
+        python3 -u scripts/orchestration/llm_judge_run.py --judge-model "$JUDGE_MODEL_CONFIG"
 
     JUDGE_EXIT_CODE=$?
     echo "Judge pass exited with code: $JUDGE_EXIT_CODE"

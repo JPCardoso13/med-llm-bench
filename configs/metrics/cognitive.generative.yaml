@@ -6,6 +6,13 @@ task_type: generative
 
 enabled: true
 
+# Per-value metric breakdowns for whatever grouping fields a dataset config
+# actually defines (BenchmarkResult.grouping, from that dataset's
+# mapping.grouping block) - e.g. medcalcbench's calculator_name/category/
+# output_type/note_type. Nothing to name here; fields with no data for a
+# given dataset just don't appear.
+enable_grouping: true
+
 extraction:
   enabled: true
   final_answer:

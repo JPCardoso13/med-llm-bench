@@ -10,6 +10,13 @@ task_type: mcq
 
 enabled: true
 
+# Per-value metric breakdowns for whatever grouping fields the dataset(s)
+# behind this task actually define (BenchmarkResult.grouping, from each
+# dataset config's mapping.grouping block). Nothing to name here - fields
+# are auto-discovered per dataset at runtime, so this stays correct no
+# matter which datasets get added or removed later.
+enable_grouping: true
+
 # MCQ-specific metrics (omit for generative tasks).
 mcq:
   enabled: true
@@ -54,7 +61,7 @@ mcq:
 #   metric_name: bertscore
 #   language: en
 
-# LLM-as-a-judge: offline pass, run separately via scripts/llm_judge_run.py
+# LLM-as-a-judge: offline pass, run separately via scripts/orchestration/llm_judge_run.py
 # after the main benchmarking run. rubric items are categorical labels, not
 # numeric scores - see configs/metrics/cognitive.generative.yaml (OECR) and
 # cognitive.generative.summarization.yaml (SRC) for real, working examples.

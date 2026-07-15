@@ -3,8 +3,8 @@ engine: vllm
 model_id: cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
 backend_api: openai_compatible
 tensor_parallel_size: 1
-max_model_len: 8192
-gpu_memory_utilization: 0.85
+max_model_len: 16384
+gpu_memory_utilization: 0.90
 enforce_eager: false
 trust_remote_code: true
 startup_timeout_s: 2400

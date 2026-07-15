@@ -21,6 +21,10 @@ execution:
   num_fewshot: 2
   flush_every: 10
   max_tokens: 1024
+  # Fixes which fewshot examples get drawn per sample, so reruns are
+  # reproducible and every model sees the same fewshot examples per
+  # question (fair comparison) instead of the previous unseeded behavior.
+  fewshot_seed: 42
 
 runtime:
   telemetry_config: configs/runtime/telemetry.auto.yaml

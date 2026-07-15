@@ -31,6 +31,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
     parse_failures: list[dict[str, Any]] = []
     ambiguous_extractions: list[dict[str, Any]] = []
     missing_ref_fields: list[dict[str, Any]] = []
+    truncated: list[dict[str, Any]] = []
 
     group_summaries = []
     for dataset, group_results in groups.items():
@@ -42,6 +43,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
                 parse_failures=parse_failures,
                 ambiguous_extractions=ambiguous_extractions,
                 missing_ref_fields=missing_ref_fields,
+                truncated=truncated,
             )
         )
 
@@ -50,6 +52,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
         parse_failures=parse_failures,
         ambiguous_extractions=ambiguous_extractions,
         missing_ref_fields=missing_ref_fields,
+        truncated=truncated,
     )
 
     fail_on_missing_ref_fields = bool(profile.get("quality_checks", {}).get("fail_on_missing_ref_fields", False))
@@ -78,10 +81,16 @@ def _summarize_group(
     parse_failures: list[dict[str, Any]],
     ambiguous_extractions: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
+    truncated: list[dict[str, Any]],
 ) -> dict[str, Any]:
     group_parse_failures: list[dict[str, Any]] = []
     group_ambiguous_extractions: list[dict[str, Any]] = []
     group_missing_ref_fields: list[dict[str, Any]] = []
+    group_truncated: list[dict[str, Any]] = [
+        {"sample_id": result.sample_id, "dataset": dataset}
+        for result in results
+        if result.backend_metrics.get("finish_reason") == "length"
+    ]
 
     group_summary: dict[str, Any] = {
         "dataset": dataset,
@@ -112,14 +121,70 @@ def _summarize_group(
     parse_failures.extend(group_parse_failures)
     ambiguous_extractions.extend(group_ambiguous_extractions)
     missing_ref_fields.extend(group_missing_ref_fields)
+    truncated.extend(group_truncated)
 
     group_summary["quality"] = {
         "parse_failure_count": len(group_parse_failures),
         "ambiguous_extraction_count": len(group_ambiguous_extractions),
         "missing_ref_field_count": len(group_missing_ref_fields),
+        "truncated_count": len(group_truncated),
     }
 
+    if profile.get("enable_grouping", False):
+        group_summary["group_by"] = _build_group_by_breakdown(
+            results=results,
+            profile=profile,
+            task_type=task_type,
+            dataset=dataset,
+        )
+
     return group_summary
+
+
+def _build_group_by_breakdown(
+    results: list[BenchmarkResult],
+    profile: Mapping[str, Any],
+    task_type: str,
+    dataset: str,
+) -> dict[str, Any]:
+    # Field names come entirely from whatever's present in each result's
+    # `grouping` dict - populated from a dataset config's `mapping.grouping`
+    # block, never named here. A field with no data for this dataset just
+    # never appears; nothing to configure per-dataset.
+    all_fields: set[str] = set()
+    for result in results:
+        all_fields.update(result.grouping.keys())
+
+    breakdown: dict[str, Any] = {}
+    for field in sorted(all_fields):
+        buckets: dict[str, list[BenchmarkResult]] = defaultdict(list)
+        for result in results:
+            for value in result.grouping.get(field, []):
+                buckets[value].append(result)
+
+        values_summary: dict[str, Any] = {}
+        for value, subset in buckets.items():
+            if task_type == "mcq":
+                values_summary[value] = _summarize_mcq_group(
+                    results=subset,
+                    profile=profile,
+                    parse_failures=[],
+                    ambiguous_extractions=[],
+                    missing_ref_fields=[],
+                    dataset=dataset,
+                )
+            elif task_type == "generative":
+                values_summary[value] = _summarize_generative_group(
+                    results=subset,
+                    profile=profile,
+                    parse_failures=[],
+                    missing_ref_fields=[],
+                    dataset=dataset,
+                )
+
+        breakdown[field] = values_summary
+
+    return breakdown
 
 
 def _summarize_generative_group(
@@ -721,6 +786,7 @@ def _build_quality_summary(
     parse_failures: list[dict[str, Any]],
     ambiguous_extractions: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
+    truncated: list[dict[str, Any]],
 ) -> dict[str, Any]:
     quality_cfg = profile.get("quality_checks", {})
     return {
@@ -730,9 +796,11 @@ def _build_quality_summary(
         "parse_failure_count": len(parse_failures),
         "ambiguous_extraction_count": len(ambiguous_extractions),
         "missing_ref_field_count": len(missing_ref_fields),
+        "truncated_count": len(truncated),
         "parse_failures": parse_failures[:200],
         "ambiguous_extractions": ambiguous_extractions[:200],
         "missing_ref_fields": missing_ref_fields[:200],
+        "truncated": truncated[:200],
     }
 
 

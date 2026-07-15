@@ -6,6 +6,13 @@ task_type: generative
 
 enabled: true
 
+# Per-value metric breakdowns for whatever grouping fields a dataset config
+# actually defines (BenchmarkResult.grouping, from that dataset's
+# mapping.grouping block) - e.g. multiclinsum's length_bin. Nothing to name
+# here; fields with no data for a given dataset (e.g. pubmedsum, which has
+# no mapping.grouping at all) just don't appear.
+enable_grouping: true
+
 # The whole response IS the summary, verbatim - no "Summary:" label to key
 # off of. src.yaml's system prompt explicitly instructs "no headers, no
 # commentary other than the summary itself", so a pattern requiring the

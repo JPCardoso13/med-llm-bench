@@ -100,6 +100,9 @@ class OpenAIBackend(BaseBackend):
             chosen_max_tokens = adjusted
             stream = self._create_stream(messages, chosen_max_tokens)
 
+        backend_metrics["max_tokens_configured"] = self._max_tokens
+        backend_metrics["max_tokens_used"] = chosen_max_tokens
+
         for chunk in stream:
             now = time.perf_counter()
 
@@ -113,6 +116,10 @@ class OpenAIBackend(BaseBackend):
 
             if not chunk.choices:
                 continue
+
+            finish_reason = chunk.choices[0].finish_reason
+            if finish_reason is not None:
+                backend_metrics["finish_reason"] = finish_reason
 
             delta = chunk.choices[0].delta.content
             if delta is None:

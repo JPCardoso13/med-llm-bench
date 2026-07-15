@@ -26,6 +26,8 @@ class SequentialRunner:
         fewshot_pool: Optional[List[Sample]] = None,
         flush_every: int = 10,
         telemetry_collector: Optional[TelemetryCollector] = None,
+        max_consecutive_failures: int = 5,
+        fewshot_seed: Optional[int] = None,
     ):
         self._backend = backend
         self._formatter = formatter
@@ -36,6 +38,13 @@ class SequentialRunner:
         self._fewshot_pool = fewshot_pool or []
         self._flush_every = flush_every
         self._telemetry_collector = telemetry_collector or NullTelemetryCollector()
+        self._max_consecutive_failures = max_consecutive_failures
+        # A local RNG instance, not the global `random` module - keeps fewshot
+        # sampling reproducible (same seed -> same draws every rerun) without
+        # mutating process-wide random state. fewshot_seed=None preserves the
+        # previous unseeded behavior exactly (random.Random(None) seeds from
+        # system entropy, same as the bare `random` module would).
+        self._rng = random.Random(fewshot_seed)
 
     def run(self, samples: List[Sample]) -> List[BenchmarkResult]:
         if self._output_path.exists():
@@ -56,6 +65,8 @@ class SequentialRunner:
         pending = []
         telemetry_warning_count = 0
         suppressed_warning_notice_printed = False
+        consecutive_failures = 0
+        failure_count = 0
 
         try:
             for i, sample in enumerate(samples):
@@ -81,15 +92,35 @@ class SequentialRunner:
                 }
                 self._telemetry_collector.before_request(request_context)
 
-                result = self._backend.generate(
-                    messages=messages,
-                    sample_id=sample.id,
-                    dataset=self._dataset_name,
-                    task_name=self._task_name,
-                    sample_type=request_context["sample_type"],
-                    ref_fields=ref_fields,
-                    grouping=grouping,
-                )
+                try:
+                    result = self._backend.generate(
+                        messages=messages,
+                        sample_id=sample.id,
+                        dataset=self._dataset_name,
+                        task_name=self._task_name,
+                        sample_type=request_context["sample_type"],
+                        ref_fields=ref_fields,
+                        grouping=grouping,
+                    )
+                except Exception as exc:
+                    failure_count += 1
+                    consecutive_failures += 1
+                    print(
+                        f"WARNING generation failed sample_id={sample.id} "
+                        f"dataset={self._dataset_name} "
+                        f"({consecutive_failures} consecutive failures): {exc}"
+                    )
+                    if consecutive_failures >= self._max_consecutive_failures:
+                        raise RuntimeError(
+                            f"{consecutive_failures} consecutive generation failures "
+                            f"on dataset={self._dataset_name} - this looks systemic "
+                            "(backend unreachable or misconfigured), not per-sample "
+                            f"bad data. Aborting rather than silently skipping the "
+                            f"rest of the dataset. Last error: {exc}"
+                        ) from exc
+                    continue
+
+                consecutive_failures = 0
 
                 request_context["request_finished_at_epoch_s"] = time.time()
                 request_context["request_finished_at_perf_counter"] = time.perf_counter()
@@ -143,13 +174,16 @@ class SequentialRunner:
             else:
                 save_results(pending, self._output_path)
 
-        print(f"Run complete. {len(results)} results saved to {self._output_path}")
+        print(
+            f"Run complete. {len(results)}/{len(samples)} samples succeeded "
+            f"({failure_count} generation failures), saved to {self._output_path}"
+        )
         return results
 
     def _sample_fewshot(self) -> List[Sample]:
         if self._num_fewshot == 0 or not self._fewshot_pool:
             return []
-        return random.sample(
+        return self._rng.sample(
             self._fewshot_pool,
             min(self._num_fewshot, len(self._fewshot_pool)),
         )

@@ -18,6 +18,11 @@ datasets:
     enabled: true
     # Optional per-dataset run cap for quick smoke tests. null means full split.
     eval_limit: null
+    # Optional per-dataset generation length override - falls back to
+    # execution.max_tokens below when omitted. Useful when datasets in the
+    # same task have very different expected answer lengths (e.g. a
+    # long-document summary vs. a short MCQ letter).
+    # max_tokens: 768
 
   - name: dataset_b
     config: configs/datasets/dataset_b.yaml
@@ -29,6 +34,13 @@ execution:
   num_fewshot: 3
   # Flush interval for writing raw results.
   flush_every: 10
+  # Fixes which fewshot examples get drawn per sample - omit for the old
+  # unseeded (non-reproducible) behavior, set an int for reproducible runs
+  # where every model sees the same fewshot examples per question.
+  fewshot_seed: 42
+  # Default generation length budget, used by any dataset in this task that
+  # doesn't set its own max_tokens above.
+  max_tokens: 1024
 
 runtime:
   # Runtime telemetry collection config (collector/endpoints/timeouts).

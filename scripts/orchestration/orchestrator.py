@@ -169,13 +169,14 @@ def run_benchmark_for_model(
     base_url: str,
     task_id: str,
 ) -> Path:
-    max_tokens = int(task_cfg.get("execution", {}).get("max_tokens", 1024))
-    backend = build_backend(model_cfg, base_url, max_tokens=max_tokens)
+    default_max_tokens = int(task_cfg.get("execution", {}).get("max_tokens", 1024))
     formatter = build_formatter(task_cfg)
     telemetry_collector = build_telemetry_collector(runtime_cfg)
 
     num_fewshot = int(task_cfg.get("execution", {}).get("num_fewshot", 0))
     flush_every = int(task_cfg.get("execution", {}).get("flush_every", 10))
+    fewshot_seed = task_cfg.get("execution", {}).get("fewshot_seed")
+    fewshot_seed = int(fewshot_seed) if fewshot_seed is not None else None
     task_name = task_cfg.get("task_id", "task")
 
     all_results = []
@@ -197,6 +198,13 @@ def run_benchmark_for_model(
         eval_samples = data.get("eval", [])[: int(eval_limit)]
         fewshot_samples = data.get("fewshot", [])
 
+        # Per-dataset override for the generation length budget, since
+        # different datasets in the same task can have very different
+        # expected answer lengths (e.g. a long-document summary vs. a short
+        # MCQ letter) - falls back to the task-level default when unset.
+        max_tokens = int(ds.get("max_tokens", default_max_tokens))
+        backend = build_backend(model_cfg, base_url, max_tokens=max_tokens)
+
         tmp_output_path = TMP_RESULTS_DIR / task_id / model_name / f"{dataset_name}.json"
         tmp_output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -210,6 +218,7 @@ def run_benchmark_for_model(
             fewshot_pool=fewshot_samples,
             flush_every=flush_every,
             telemetry_collector=telemetry_collector,
+            fewshot_seed=fewshot_seed,
         )
 
         results = runner.run(eval_samples)

@@ -91,11 +91,11 @@ def _sync_hf_env() -> None:
         if hf_home:
             os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(hf_home, "hub")
 
-    # Last resort: infer cache from project layout (<workdir>/scripts/vllm_launcher.py).
+    # Last resort: infer cache from project layout (<workdir>/scripts/vllm/vllm_launcher.py).
     # This covers clusters where the SINGULARITYENV_* mechanism is disabled by SLURM and
     # none of the HF env vars make it into the container.
     if not os.environ.get("HUGGINGFACE_HUB_CACHE"):
-        candidate = Path(__file__).resolve().parent.parent / ".cache" / "huggingface" / "hub"
+        candidate = Path(__file__).resolve().parent.parent.parent / ".cache" / "huggingface" / "hub"
         if candidate.is_dir():
             os.environ["HUGGINGFACE_HUB_CACHE"] = str(candidate)
             os.environ.setdefault("HF_HUB_OFFLINE", "1")

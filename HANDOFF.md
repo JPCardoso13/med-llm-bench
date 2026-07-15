@@ -15,6 +15,49 @@ it here**, and you need to go back to the devcontainer, commit, and push
 before continuing. Don't assume this file being present means the code is
 present too.
 
+## Addendum: scripts/ was reorganized after this handoff was written
+
+A separate session (not this one) reorganized `scripts/` into subdirectories
+and renamed some files, then continued dataset-creation work. Every path
+below written as `scripts/multi_model_orchestrator.py` or
+`scripts/llm_judge_run.py` is **stale** — the real locations are now:
+
+| Old path | New path |
+|---|---|
+| `scripts/multi_model_orchestrator.py` | `scripts/orchestration/orchestrator.py` |
+| `scripts/llm_judge_run.py` | `scripts/orchestration/llm_judge_run.py` |
+| `scripts/vllm_manager.py` | `scripts/vllm/vllm_manager.py` |
+| `scripts/vllm_launcher.py` | `scripts/vllm/vllm_launcher.py` |
+| `scripts/download_hf_assets.py`/`.sh` | `scripts/asset_caching/download_hf_assets.py`/`.sh` |
+| `multi_model_orchestration.sh` (repo root) | split into `scripts/orchestration/slurm_orchestrator.sh` (rtx4060/haslab cluster) and `scripts/orchestration/deucalion_orchestrator.sh` (A100/deucalion cluster, has the same judge-step integration) |
+
+The reorg also changed the cross-module import style: `orchestrator.py` and
+`llm_judge_run.py` now import each other and `vllm_manager` via
+package-qualified paths (`from scripts.vllm.vllm_manager import ...`,
+`from scripts.orchestration.orchestrator import ...`) instead of relying on
+bare-name imports off `sys.path[0]`. **This requires the repo root on
+`PYTHONPATH`** (or `-m scripts.orchestration.orchestrator`-style module
+execution) — direct script execution (`python3 scripts/orchestration/
+orchestrator.py`) with no `PYTHONPATH` set will fail with `ModuleNotFoundError:
+No module named 'scripts'`. The SLURM wrappers already export
+`SINGULARITYENV_PYTHONPATH="$WORKDIR..."` so this isn't an issue there; it
+matters for local/devcontainer runs, where you need
+`PYTHONPATH=/app python3 scripts/orchestration/orchestrator.py` explicitly.
+
+**Five real breaks caused by the reorg, found and fixed in a later session**
+(if you're reading this from a commit before that fix landed, check for
+these): both SLURM wrapper scripts (`slurm_orchestrator.sh`,
+`deucalion_orchestrator.sh`) still pointed at the old, now-deleted
+`scripts/multi_model_orchestrator.py` and `scripts/llm_judge_run.py` paths;
+`download_hf_assets.sh` still pointed at the old `scripts/
+download_hf_assets.py` path; and `vllm_launcher.py`'s HF-cache fallback
+(`Path(__file__).resolve().parent.parent`) silently broke because the file
+gained an extra directory level of nesting — it needed a third `.parent` to
+still resolve to the repo root. That last one is the nastiest of the five:
+it's a "last resort" fallback that only matters when the primary env-var
+mechanism fails, so it would have stayed silently broken until exactly the
+cluster situation it exists to handle.
+
 ## Project context
 
 Model- and domain-agnostic LLM benchmarking framework (`llm_bench/`),
@@ -34,8 +77,8 @@ been run successfully before this session.
 Architecture: the judge is just another swappable `configs/models/judges/
 *.yaml` model config, reusing the existing `start_vllm`/`stop_vllm`
 lifecycle. It runs as a **separate offline pass**
-(`scripts/llm_judge_run.py`) after the main `multi_model_orchestrator.py`
-benchmarking run finishes: reads `outputs/raw/`, writes `outputs/judged/`,
+(`scripts/orchestration/llm_judge_run.py`) after the main
+`scripts/orchestration/orchestrator.py` benchmarking run finishes: reads `outputs/raw/`, writes `outputs/judged/`,
 and patches an `llm_judge` section into the already-written
 `outputs/reports/<task>/<model>/cognitive_summary.json` in place.
 
@@ -60,7 +103,8 @@ in that task's cognitive profile YAML and a new judge prompt config.
 
 New files: `llm_bench/judge/` (`schemas.py`, `prompt_builder.py`,
 `response_parser.py`, `judge_client.py`, `__init__.py`),
-`configs/prompts/judge/{oecr,src}_judge.yaml`, `scripts/llm_judge_run.py`.
+`configs/prompts/judge/{oecr,src}_judge.yaml`,
+`scripts/orchestration/llm_judge_run.py`.
 
 **Empirically confirmed working** (not just "should work"): vLLM 0.15.1's
 `response_format: json_schema` structured output — 100% parse success across
@@ -79,7 +123,12 @@ AI-extracted from papers and may be incomplete or not the only valid
 reasoning path. Flagged by the user as "less defensible, worth revisiting" —
 a documented tradeoff, not an oversight. See backlog below.
 
-### 2. `multi_model_orchestration.sh` — judge wired into the SLURM job
+### 2. SLURM wrapper(s) — judge wired into the job
+
+(At the time this was written, this was one file, `multi_model_orchestration.sh`
+at the repo root — it's since been split into `scripts/orchestration/
+slurm_orchestrator.sh` and `scripts/orchestration/deucalion_orchestrator.sh`,
+see addendum at the top. The change described below applies to both.)
 
 Added a second `srun` step after the main orchestrator, reusing the same
 allocation/Singularity exports, gated on the orchestrator exiting cleanly
@@ -128,7 +177,8 @@ ballpark of real citations.
 
 - Removed `scripts/test_run.py` (hardcoded a stale unreachable IP) and
   `scripts/cdkr_test_run.py` (CDKR-only predecessor fully superseded by
-  `multi_model_orchestrator.py`) — confirmed dead, not just suspected.
+  `scripts/orchestration/orchestrator.py`) — confirmed dead, not just
+  suspected.
 - Deleted `BenchmarkResult.cognitive_scores` (unused `Dict[str, float]`
   field, wrong type for judge output anyway — judge scores are categorical
   and live externally in `outputs/judged/`).
@@ -156,10 +206,10 @@ Built for smoke-testing in a devcontainer with a single 16GB consumer GPU
 (RTX 5070 Ti) — none of this is meant to carry over to the cluster:
 - `configs/models/local_smoke/` — copies of `phi3_mini_4k_instruct.yaml` +
   `qwen2_5_3b_instruct.yaml` from `unused/`, isolated via a `MODELS_DIR` env
-  var override added to `multi_model_orchestrator.py`
-  (`MODELS_DIR=configs/models/local_smoke python3 scripts/
-  multi_model_orchestrator.py`) so local runs never touch the real 8-model
-  roster. On the cluster, just don't set `MODELS_DIR` — the default
+  var override added to `scripts/orchestration/orchestrator.py`
+  (`MODELS_DIR=configs/models/local_smoke PYTHONPATH=/app python3
+  scripts/orchestration/orchestrator.py`) so local runs never touch the real
+  8-model roster. On the cluster, just don't set `MODELS_DIR` — the default
   (`configs/models/*.yaml`) is unchanged and picks up the real roster.
 - `configs/models/judges/qwen2_5_3b_instruct_judge.yaml` — a tiny
   local-only judge candidate, not meant for the real run.
@@ -170,9 +220,8 @@ Built for smoke-testing in a devcontainer with a single 16GB consumer GPU
   just because it's kept intentionally.
 - `configs/runtime/telemetry.auto.yaml` currently reads `enabled: false` —
   that's this devcontainer's state, not meaningful for the cluster. The
-  SLURM wrapper (`multi_model_orchestration.sh`) unconditionally regenerates
-  this file dynamically on every real run; it's a disposable generated
-  artifact, not hand-authored config.
+  SLURM wrappers unconditionally regenerate this file dynamically on every
+  real run; it's a disposable generated artifact, not hand-authored config.
 
 ## Critical facts to know before running on the cluster
 
@@ -186,8 +235,8 @@ Built for smoke-testing in a devcontainer with a single 16GB consumer GPU
    all: request a 4th GPU (TP=4 gives huge headroom), push
    `gpu_memory_utilization` to ~0.92-0.95 (risky, thin margin for KV cache),
    or add quantized variants (changes what's actually being benchmarked).
-2. **No orchestration-level resumability.** `multi_model_orchestrator.py`
-   has zero skip-if-already-done logic. If the SLURM job times out or fails
+2. **No orchestration-level resumability.**
+   `scripts/orchestration/orchestrator.py` has zero skip-if-already-done logic. If the SLURM job times out or fails
    partway through, resubmitting restarts from model #1, burning all prior
    GPU-hours. Combined with the unvalidated `--time` budget above, this is a
    real risk of a resubmit loop that never actually finishes.

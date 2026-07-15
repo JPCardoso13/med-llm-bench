@@ -6,6 +6,13 @@ task_type: mcq
 
 enabled: true
 
+# Per-value metric breakdowns for whatever grouping fields a dataset config
+# actually defines (BenchmarkResult.grouping, from that dataset's
+# mapping.grouping block) - e.g. medxpertqa's body_system/medical_task/
+# question_type, medqa's meta_info. Nothing to name here; fields with no
+# data for a given dataset just don't appear.
+enable_grouping: true
+
 # Ordered regex patterns tried against the (think-block-stripped) response;
 # each must capture the answer letter in group 1. Every match across every
 # pattern contributes a candidate - more than one distinct letter found makes

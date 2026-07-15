@@ -2,8 +2,8 @@ name: llama3_openbiollm_70b
 engine: vllm
 model_id: aaditya/Llama3-OpenBioLLM-70B
 backend_api: openai_compatible
-tensor_parallel_size: 2
-max_model_len: 4096
-gpu_memory_utilization: 0.85
+tensor_parallel_size: 4
+max_model_len: 16384
+gpu_memory_utilization: 0.90
 enforce_eager: false
 startup_timeout_s: 2400

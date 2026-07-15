@@ -29,4 +29,4 @@ export SINGULARITYENV_HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}
 
 echo "Downloading Hugging Face assets into: $HF_HOME"
 
-singularity exec --env-file .env "$SIF" python3 scripts/download_hf_assets.py
+singularity exec --env-file .env "$SIF" python3 scripts/asset_caching/download_hf_assets.py
