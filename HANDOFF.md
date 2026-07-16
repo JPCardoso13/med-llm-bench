@@ -31,6 +31,85 @@ below written as `scripts/multi_model_orchestrator.py` or
 | `scripts/download_hf_assets.py`/`.sh` | `scripts/asset_caching/download_hf_assets.py`/`.sh` |
 | `multi_model_orchestration.sh` (repo root) | split into `scripts/orchestration/slurm_orchestrator.sh` (rtx4060/haslab cluster) and `scripts/orchestration/deucalion_orchestrator.sh` (A100/deucalion cluster, has the same judge-step integration) |
 
+**Further consolidated on 2026-07-16** (a later devcontainer session, this
+one): `slurm_orchestrator.sh` and `deucalion_orchestrator.sh` were ~220-line
+near-duplicates of the same job body, differing only in `#SBATCH` header
+values — a real, already-demonstrated risk (both picked up the same
+stale-path bug from the reorg above independently, since keeping two copies
+in sync is manual). Split into a shared job body,
+`scripts/orchestration/run_pipeline.sh` (no `#SBATCH` pragmas), plus two
+thin per-cluster wrappers that now submit it via `sbatch` themselves. **The
+invocation command changed**: run these with `bash`, not `sbatch` —
+`bash scripts/orchestration/slurm_orchestrator.sh` /
+`bash scripts/orchestration/deucalion_orchestrator.sh`. Each wrapper is just
+a fixed `sbatch --partition=... --account=... [...] run_pipeline.sh` call
+(cluster-specific resource flags passed on the `sbatch` command line, which
+override any `#SBATCH` pragma — none exist in `run_pipeline.sh` now).
+Verified: `bash -n` syntax check on all three files, byte-for-byte diff of
+`run_pipeline.sh`'s body against the pre-split shared body, and a mocked
+`sbatch` (a stub script capturing its argv) run through both wrappers to
+confirm each constructs the exact same flag set the old `#SBATCH` headers
+carried, plus resolves `run_pipeline.sh`'s absolute path correctly
+regardless of invocation directory. Not yet verified against a real SLURM
+cluster (none available in the devcontainer) — do a real dry run before
+trusting it fully.
+
+**Same session, a closer pass over `run_pipeline.sh` turned up four more
+issues** (user explicitly asked for a dead-code/duplicate-code/dead-if-check
+review of this file once it was the shared job body being looked at
+closely):
+- `HF_OFFLINE`/`HF_CACHE_MODE`/`HF_EVICT_BETWEEN_MODELS` were hardcoded to
+  one profile ("no internet, persistent storage") directly in the shared
+  body, unconditionally overriding anything set before invocation — despite
+  the script's own comment documenting two distinct profiles and later
+  fallback logic (`${HF_CACHE_MODE:-persistent}` etc.) that could never
+  actually apply because the hardcoded `export` lines ran first. Since these
+  are genuinely cluster-specific (network access, storage size), moved them
+  to each wrapper instead: `slurm_orchestrator.sh` (rtx4060/haslab) exports
+  `HF_OFFLINE=0 HF_CACHE_MODE=ephemeral HF_EVICT_BETWEEN_MODELS=1` (internet,
+  small storage); `deucalion_orchestrator.sh` exports `HF_OFFLINE=1
+  HF_CACHE_MODE=persistent HF_EVICT_BETWEEN_MODELS=0` (no internet, big
+  storage) — both confirmed with the user directly. Still overridable by
+  exporting the same variables before running a wrapper (`sbatch`'s default
+  `--export=ALL` propagates the wrapper's environment into the job).
+- A duplicate `mapfile -t nodes_array < <(scontrol show hostnames ...)` -
+  `nodes_array` was already populated once, unconditionally, near the top of
+  the script; the Ray-bootstrap branch recomputed the identical thing a
+  second time for no reason. Removed the redundant one.
+- A dead 15-line block of `export SINGULARITYENV_*` shell exports - every
+  actual `singularity exec` in the script runs via `srun
+  --export="${singularity_exports}..."`, which independently reconstructs
+  every one of those same key=value pairs from the underlying plain bash
+  variables (`$HF_HOME`, `$HF_HUB_OFFLINE`, etc.), and always starts with
+  `"ALL,"` regardless. Nothing in the script ever reads the ambient
+  exports. Removed 14 of the 15 - the 15th,
+  `SINGULARITYENV_PYTORCH_ALLOC_CONF` (a real CUDA allocator tuning
+  setting), was the one exception **not** already duplicated in
+  `singularity_exports`, so simply deleting the whole block would have
+  silently dropped a load-bearing setting. Caught before shipping; added it
+  into `singularity_exports` explicitly instead of leaving it on the dead
+  ambient-export path.
+- A real bug, not just cosmetic: under `set -euo pipefail`, a bare `EXIT_CODE=$?`
+  placed on the line *after* a failing `srun ...` command is unreachable -
+  `set -e` aborts the script immediately on the failing command, straight to
+  the `cleanup` trap, before that next line ever executes. This made the
+  entire `if [[ "$EXIT_CODE" -eq 0 ]] ... else "Skipping LLM-as-judge pass"
+  fi` block's failure branch dead code - on a real orchestrator failure, the
+  script would silently exit without ever printing "Orchestrator exited with
+  code: N" or "Skipping LLM-as-judge pass: orchestrator did not exit
+  cleanly", losing exactly the diagnostic messages you'd want to see in the
+  SLURM log after a failed run. Fixed using the standard `set -e`-safe
+  pattern (`EXIT_CODE=0; srun ... || EXIT_CODE=$?`) for both the orchestrator
+  and judge-pass invocations.
+
+All four verified with a real mocked end-to-end execution of
+`run_pipeline.sh` (fake `scontrol`/`srun`/`singularity`/`hostname`, not just
+`bash -n`): single-node success path, single-node failure path (confirmed
+both diagnostic messages now print and the real exit code, e.g. `3`,
+propagates correctly instead of being swallowed), and the multi-node
+Ray-bootstrap path (confirmed `head_node`/`worker_node` still resolve
+correctly with the duplicate `mapfile` removed).
+
 The reorg also changed the cross-module import style: `orchestrator.py` and
 `llm_judge_run.py` now import each other and `vllm_manager` via
 package-qualified paths (`from scripts.vllm.vllm_manager import ...`,
@@ -204,20 +283,23 @@ ballpark of real citations.
 
 Built for smoke-testing in a devcontainer with a single 16GB consumer GPU
 (RTX 5070 Ti) — none of this is meant to carry over to the cluster:
-- `configs/models/local_smoke/` — copies of `phi3_mini_4k_instruct.yaml` +
-  `qwen2_5_3b_instruct.yaml` from `unused/`, isolated via a `MODELS_DIR` env
-  var override added to `scripts/orchestration/orchestrator.py`
-  (`MODELS_DIR=configs/models/local_smoke PYTHONPATH=/app python3
-  scripts/orchestration/orchestrator.py`) so local runs never touch the real
-  8-model roster. On the cluster, just don't set `MODELS_DIR` — the default
-  (`configs/models/*.yaml`) is unchanged and picks up the real roster.
+- `configs/models/` is now a **flat catalog** of every model definition
+  (production + small local ones) — no more `unused/`/`local_smoke/`
+  subdirectories, no more `MODELS_DIR` env var. What a given run actually
+  executes is picked with an explicit **run config**:
+  `configs/runs/local_smoke.yaml` (2 small models, all 3 tasks) vs.
+  `configs/runs/full_production.yaml` (all 8 production models, all 3
+  tasks), selected via `RUN_CONFIG=configs/runs/local_smoke.yaml
+  PYTHONPATH=/app python3 scripts/orchestration/orchestrator.py`. On the
+  cluster, the SLURM wrappers set `RUN_CONFIG=configs/runs/full_production.yaml`
+  by default — no env var to unset, just point `RUN_CONFIG` at the run you
+  want. An unknown task/model name in a run config raises loudly at startup
+  rather than silently selecting nothing.
 - `configs/models/judges/qwen2_5_3b_instruct_judge.yaml` — a tiny
   local-only judge candidate, not meant for the real run.
-- `configs/models/unused/phi3_mini_4k_instruct.yaml` had a real bug fixed
-  during this work too: `max_model_len: 8192` exceeded the model's actual
-  4096-token context (its name says "4k"). Fixed to `4096`. Unrelated to
-  the cluster roster, but worth knowing `unused/` isn't guaranteed-correct
-  just because it's kept intentionally.
+- `configs/models/phi3_mini_4k_instruct.yaml` had a real bug fixed during
+  this work too: `max_model_len: 8192` exceeded the model's actual
+  4096-token context (its name says "4k"). Fixed to `4096`.
 - `configs/runtime/telemetry.auto.yaml` currently reads `enabled: false` —
   that's this devcontainer's state, not meaningful for the cluster. The
   SLURM wrappers unconditionally regenerate this file dynamically on every

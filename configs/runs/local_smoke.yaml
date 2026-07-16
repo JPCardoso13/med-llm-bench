@@ -1,0 +1,14 @@
+# Local devcontainer smoke-testing: 2 small models that fit a single 16GB
+# consumer GPU, all 3 tasks. Replaces the old MODELS_DIR=configs/models/
+# local_smoke/ directory-swap approach - these models now live directly in
+# the flat configs/models/ catalog (they came from configs/models/unused/),
+# this run config just selects them instead of needing a duplicated
+# directory of copied config files.
+tasks:
+  - cdkr
+  - oecr
+  - src
+
+models:
+  - phi3_mini_4k_instruct
+  - qwen2_5_3b_instruct

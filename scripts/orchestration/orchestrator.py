@@ -26,7 +26,7 @@ from llm_bench.utils.io import save_results_json
 
 
 TASKS_DIR = Path("configs/tasks")
-MODELS_DIR = Path(os.getenv("MODELS_DIR", "configs/models"))
+MODELS_DIR = Path("configs/models")
 PER_DATASET_EVAL_LIMIT = 5
 RAW_RESULTS_DIR = Path("outputs/raw")
 REPORTS_DIR = Path("outputs/reports")
@@ -150,15 +150,58 @@ def build_formatter(task_cfg: dict[str, Any]):
     raise ValueError(f"Unsupported task_type: {task_type}")
 
 
-def discover_task_configs() -> list[Path]:
-    """Discover all task configs from configs/tasks/*.yaml, sorted by name."""
+def load_run_config() -> dict[str, Any] | None:
+    """Load the run config named by $RUN_CONFIG, if set.
+
+    A run config is an explicit selection ({"tasks": [...], "models": [...]})
+    narrowing what a run covers, by task/model config file stem. Absent (the
+    common case for existing invocations, including the SLURM wrappers until
+    they're updated to set it), discovery falls back to every config file
+    present in configs/tasks/ and configs/models/ - unchanged behavior.
+    """
+    run_config_path = os.getenv("RUN_CONFIG")
+    if not run_config_path:
+        return None
+    return load_yaml(run_config_path)
+
+
+def _filter_by_selection(configs: list[Path], selected_names: list[str] | None, kind: str) -> list[Path]:
+    if not selected_names:
+        return configs
+
+    by_stem = {c.stem: c for c in configs}
+    missing = [name for name in selected_names if name not in by_stem]
+    if missing:
+        raise ValueError(
+            f"Run config selects unknown {kind}(s) not found in the catalog: {missing}. "
+            f"Available: {sorted(by_stem)}"
+        )
+
+    return [by_stem[name] for name in selected_names]
+
+
+def discover_task_configs(run_config: dict[str, Any] | None = None) -> list[Path]:
+    """Discover task configs from configs/tasks/*.yaml, sorted by name.
+
+    Narrowed to run_config["tasks"] (matched by file stem) when a run config
+    with that key is provided; otherwise every non-template config is used.
+    """
     configs = list(TASKS_DIR.glob("*.yaml"))
     configs = [c for c in configs if c.stem != "template"]
+    configs = _filter_by_selection(configs, run_config.get("tasks") if run_config else None, "task")
     return sorted(configs)
 
 
-def discover_model_configs() -> list[Path]:
-    return sorted(MODELS_DIR.glob("*.yaml"))
+def discover_model_configs(run_config: dict[str, Any] | None = None) -> list[Path]:
+    """Discover model configs from configs/models/*.yaml, sorted by name.
+
+    Narrowed to run_config["models"] (matched by file stem) when a run config
+    with that key is provided; otherwise every config in the catalog is used.
+    Non-recursive, so configs/models/judges/ is never picked up here - judge
+    selection is a separate mechanism (--judge-model / JUDGE_MODEL_CONFIG).
+    """
+    configs = sorted(MODELS_DIR.glob("*.yaml"))
+    return _filter_by_selection(configs, run_config.get("models") if run_config else None, "model")
 
 
 def run_benchmark_for_model(
@@ -168,7 +211,7 @@ def run_benchmark_for_model(
     runtime_cfg: dict[str, Any],
     base_url: str,
     task_id: str,
-) -> Path:
+) -> tuple[Path, dict[str, Any]]:
     default_max_tokens = int(task_cfg.get("execution", {}).get("max_tokens", 1024))
     formatter = build_formatter(task_cfg)
     telemetry_collector = build_telemetry_collector(runtime_cfg)
@@ -179,61 +222,77 @@ def run_benchmark_for_model(
     fewshot_seed = int(fewshot_seed) if fewshot_seed is not None else None
     task_name = task_cfg.get("task_id", "task")
 
-    all_results = []
     datasets_cfg = task_cfg.get("datasets", [])
     enabled_datasets = [d for d in datasets_cfg if d.get("enabled", True)]
     grouped_results: dict[str, list[dict]] = {}
-
-    for ds in enabled_datasets:
-        dataset_name = ds["name"]
-        dataset_config_path = ds["config"]
-
-        loader = YamlLoader(dataset_config_path)
-        data = loader.load()
-
-        eval_limit = ds.get("eval_limit")
-        if eval_limit is None:
-            eval_limit = PER_DATASET_EVAL_LIMIT
-
-        eval_samples = data.get("eval", [])[: int(eval_limit)]
-        fewshot_samples = data.get("fewshot", [])
-
-        # Per-dataset override for the generation length budget, since
-        # different datasets in the same task can have very different
-        # expected answer lengths (e.g. a long-document summary vs. a short
-        # MCQ letter) - falls back to the task-level default when unset.
-        max_tokens = int(ds.get("max_tokens", default_max_tokens))
-        backend = build_backend(model_cfg, base_url, max_tokens=max_tokens)
-
-        tmp_output_path = TMP_RESULTS_DIR / task_id / model_name / f"{dataset_name}.json"
-        tmp_output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        runner = SequentialRunner(
-            backend=backend,
-            formatter=formatter,
-            task_name=task_name,
-            dataset_name=dataset_name,
-            output_path=tmp_output_path,
-            num_fewshot=num_fewshot,
-            fewshot_pool=fewshot_samples,
-            flush_every=flush_every,
-            telemetry_collector=telemetry_collector,
-            fewshot_seed=fewshot_seed,
-        )
-
-        results = runner.run(eval_samples)
-        # store per-dataset results in tmp (already written by runner)
-        grouped_results[dataset_name] = [r.model_dump(mode="json") for r in results]
-        all_results.extend(results)
-        print(f"  Dataset {dataset_name}: {len(results)}/{len(eval_samples)} results")
+    dataset_status: dict[str, Any] = {}
 
     RAW_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_RESULTS_DIR / task_id / f"{model_name}.json"
     raw_path.parent.mkdir(parents=True, exist_ok=True)
-    # Write grouped-by-dataset raw results (backwards-compatible: previously a flat list)
-    raw_path.write_text(json.dumps(grouped_results, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    for ds in enabled_datasets:
+        dataset_name = ds["name"]
+        try:
+            dataset_config_path = ds["config"]
+
+            loader = YamlLoader(dataset_config_path)
+            data = loader.load()
+
+            eval_limit = ds.get("eval_limit")
+            if eval_limit is None:
+                eval_limit = PER_DATASET_EVAL_LIMIT
+
+            eval_samples = data.get("eval", [])[: int(eval_limit)]
+            fewshot_samples = data.get("fewshot", [])
+
+            # Per-dataset override for the generation length budget, since
+            # different datasets in the same task can have very different
+            # expected answer lengths (e.g. a long-document summary vs. a short
+            # MCQ letter) - falls back to the task-level default when unset.
+            max_tokens = int(ds.get("max_tokens", default_max_tokens))
+            backend = build_backend(model_cfg, base_url, max_tokens=max_tokens)
+
+            tmp_output_path = TMP_RESULTS_DIR / task_id / model_name / f"{dataset_name}.json"
+            tmp_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            runner = SequentialRunner(
+                backend=backend,
+                formatter=formatter,
+                task_name=task_name,
+                dataset_name=dataset_name,
+                output_path=tmp_output_path,
+                num_fewshot=num_fewshot,
+                fewshot_pool=fewshot_samples,
+                flush_every=flush_every,
+                telemetry_collector=telemetry_collector,
+                fewshot_seed=fewshot_seed,
+            )
+
+            results = runner.run(eval_samples)
+            grouped_results[dataset_name] = [r.model_dump(mode="json") for r in results]
+            dataset_status[dataset_name] = {
+                "attempted": len(eval_samples),
+                "succeeded": len(results),
+                "error": None,
+            }
+            print(f"  Dataset {dataset_name}: {len(results)}/{len(eval_samples)} results")
+        except Exception as exc:
+            # A dataset-level failure (bad dataset config, backend outage,
+            # SequentialRunner's circuit breaker tripping on systemic
+            # failures, etc.) must not abort sibling datasets for this
+            # model/task - skip it and keep going.
+            print(f"  ERROR dataset {dataset_name}: {exc}")
+            dataset_status[dataset_name] = {"attempted": None, "succeeded": 0, "error": str(exc)}
+
+        # Persist after every dataset attempt, not just once at the end -
+        # previously a later dataset's failure would propagate and abort
+        # before raw_path was ever written, silently destroying earlier
+        # datasets' already-successful results too.
+        raw_path.write_text(json.dumps(grouped_results, ensure_ascii=False, indent=2), encoding="utf-8")
+
     print(f"  Raw results: {raw_path}")
-    return raw_path
+    return raw_path, dataset_status
 
 
 def compute_and_save_metrics(model_name: str, raw_path: Path, task_id: str, systems_profile: dict[str, Any], cognitive_profile: dict[str, Any]) -> tuple[Path, Path | None]:
@@ -308,7 +367,7 @@ def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: 
             print(f"  Serving at {handle.base_url} (mode={handle.mode})")
 
             os.environ["LLM_BASE_URL"] = handle.base_url
-            raw_path = run_benchmark_for_model(model_cfg, model_name, task_cfg, runtime_cfg, handle.base_url, task_id)
+            raw_path, dataset_status = run_benchmark_for_model(model_cfg, model_name, task_cfg, runtime_cfg, handle.base_url, task_id)
 
             systems_path, cognitive_path = compute_and_save_metrics(model_name, raw_path, task_id, systems_profile, cognitive_profile)
             print(f"  Systems summary: {systems_path}")
@@ -321,6 +380,7 @@ def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: 
                 "systems_summary": str(systems_path),
                 "cognitive_summary": str(cognitive_path) if cognitive_path else None,
                 "serve_mode": handle.mode,
+                "datasets": dataset_status,
             })
         except Exception as exc:
             print(f"ERROR processing {model_name}: {exc}")
@@ -343,12 +403,16 @@ def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: 
 def main() -> None:
     load_dotenv()
 
-    task_configs = discover_task_configs()
+    run_config = load_run_config()
+    if run_config is not None:
+        print(f"Using run config: {os.environ['RUN_CONFIG']}")
+
+    task_configs = discover_task_configs(run_config)
     if not task_configs:
         print("No task configs found in configs/tasks/ (excluding template.yaml)")
         return
 
-    model_configs = discover_model_configs()
+    model_configs = discover_model_configs(run_config)
     if not model_configs:
         print("No model configs found in configs/models/")
         return
@@ -368,7 +432,7 @@ def main() -> None:
 
     # Write overall multi-task summary
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    overall_summary_path = REPORTS_DIR / "multi_task_summary.json"
+    overall_summary_path = REPORTS_DIR / "run_summary.json"
     overall_summary_path.write_text(json.dumps(all_summaries, indent=2), encoding="utf-8")
     print(f"\n{'='*80}")
     print(f"Overall multi-task summary written to: {overall_summary_path}")
