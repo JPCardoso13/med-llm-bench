@@ -150,18 +150,26 @@ def build_formatter(task_cfg: dict[str, Any]):
     raise ValueError(f"Unsupported task_type: {task_type}")
 
 
-def load_run_config() -> dict[str, Any] | None:
-    """Load the run config named by $RUN_CONFIG, if set.
+def load_run_config() -> dict[str, Any]:
+    """Load the run config named by $RUN_CONFIG.
 
     A run config is an explicit selection ({"tasks": [...], "models": [...]})
-    narrowing what a run covers, by task/model config file stem. Absent (the
-    common case for existing invocations, including the SLURM wrappers until
-    they're updated to set it), discovery falls back to every config file
-    present in configs/tasks/ and configs/models/ - unchanged behavior.
+    naming what a run covers, by task/model config file stem. Required, not
+    optional: configs/models/ is a flat catalog that includes small local-test
+    models alongside the 8 production ones, so a silent "nothing set, discover
+    everything" fallback would risk quietly running the wrong roster. The
+    SLURM wrappers always set RUN_CONFIG (default configs/runs/full_production.yaml)
+    - this only bites a direct invocation that forgets to set it, and it
+    should bite loudly rather than silently widen scope.
     """
     run_config_path = os.getenv("RUN_CONFIG")
     if not run_config_path:
-        return None
+        raise RuntimeError(
+            "RUN_CONFIG is not set. Set it to a configs/runs/*.yaml file explicitly, "
+            "e.g. RUN_CONFIG=configs/runs/local_smoke.yaml - there is no implicit "
+            "full-catalog fallback, since configs/models/ now includes small "
+            "local-test models alongside the 8 production ones."
+        )
     return load_yaml(run_config_path)
 
 
@@ -404,8 +412,7 @@ def main() -> None:
     load_dotenv()
 
     run_config = load_run_config()
-    if run_config is not None:
-        print(f"Using run config: {os.environ['RUN_CONFIG']}")
+    print(f"Using run config: {os.environ['RUN_CONFIG']}")
 
     task_configs = discover_task_configs(run_config)
     if not task_configs:

@@ -1,14 +1,21 @@
 # Local devcontainer smoke-testing: 2 small models that fit a single 16GB
-# consumer GPU, all 3 tasks. Replaces the old MODELS_DIR=configs/models/
-# local_smoke/ directory-swap approach - these models now live directly in
-# the flat configs/models/ catalog (they came from configs/models/unused/),
-# this run config just selects them instead of needing a duplicated
-# directory of copied config files.
+# consumer GPU, all 3 tasks. Note: this run config only selects the
+# benchmarked models - the judge is a separate mechanism entirely
+# (--judge-model / JUDGE_MODEL_CONFIG pointed at
+# configs/models/judges/gemma3_4b_it_judge.yaml for local testing).
+#
+# phi3_mini_4k_instruct dropped (2026-07-18): its native 4096 context
+# repeatedly caused per-sample failures on real datasets (medcalcbench,
+# pubmedsum) that needed more room. First replacement attempt,
+# llama3_2_3b_instruct, turned out to be a gated HF repo this
+# devcontainer's token can't access (confirmed via a real boot failure) -
+# replaced again with granite_3_1_2b_instruct, ungated and confirmed
+# booting cleanly with max_model_len=16384.
 tasks:
   - cdkr
   - oecr
   - src
 
 models:
-  - phi3_mini_4k_instruct
   - qwen2_5_3b_instruct
+  - granite_3_1_2b_instruct

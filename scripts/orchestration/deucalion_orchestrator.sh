@@ -8,6 +8,7 @@ set -euo pipefail
 # sbatch so they reach the job (sbatch defaults to --export=ALL, propagating
 # the submitting shell's environment). Still overridable by exporting these
 # yourself before running this wrapper.
+export WORKDIR="${WORKDIR:-/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-bench}"
 export HF_OFFLINE="${HF_OFFLINE:-1}"
 export HF_CACHE_MODE="${HF_CACHE_MODE:-persistent}"
 export HF_EVICT_BETWEEN_MODELS="${HF_EVICT_BETWEEN_MODELS:-0}"
@@ -22,7 +23,7 @@ sbatch \
     --gpus=4 \
     --ntasks=1 \
     --cpus-per-task=128 \
-    --time=02:30:00 \
+    --time=06:00:00 \
     --output=logs/orchestration/out/deucalion_orchestrator_%j.out \
     --error=logs/orchestration/err/deucalion_orchestrator_%j.err \
     "$SCRIPT_DIR/run_pipeline.sh"

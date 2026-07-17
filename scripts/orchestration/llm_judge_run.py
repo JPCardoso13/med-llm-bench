@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-model",
         required=True,
-        help="Path to a judge model config, e.g. configs/models/judges/medgemma_27b_it_judge.yaml",
+        help="Path to a judge model config, e.g. configs/models/judges/deepseek_v4_flash_judge.yaml",
     )
     parser.add_argument("--serve-port", type=int, default=int(os.getenv("JUDGE_SERVE_PORT", "8010")))
     parser.add_argument(

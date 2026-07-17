@@ -1,0 +1,19 @@
+name: deepseek_v4_flash_judge
+engine: vllm
+model_id: deepseek-ai/DeepSeek-V4-Flash
+backend_api: openai_compatible
+# 284B total / 13B active (MoE) - unrelated model family to every production
+# model in the roster, avoiding the self-evaluation risk of the previous
+# judge choice. TP=4 to match this cluster's allocation: ~156GB estimated
+# weight footprint (mixed FP4 MoE experts / FP8 rest) shards to ~39GB/GPU,
+# leaving ~33GB/GPU headroom for KV cache at this project's max_model_len -
+# not the model's native 1M context, which this task doesn't need.
+tensor_parallel_size: 4
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+# Larger than the 70B production models' 2400s - loading ~156GB of weights
+# (plus this being a brand-new, more complex hybrid-attention architecture)
+# is likely slower to initialize. Unverified: this is our first attempt at
+# serving this specific architecture with vLLM, revisit after a real boot.
+startup_timeout_s: 3600

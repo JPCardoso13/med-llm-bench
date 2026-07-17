@@ -12,6 +12,7 @@ set -euo pipefail
 # they reach the job (sbatch defaults to --export=ALL, propagating the
 # submitting shell's environment). Still overridable by exporting these
 # yourself before running this wrapper.
+export WORKDIR="${WORKDIR:-/projects/jcardoso/med-llm-bench}"
 export HF_OFFLINE="${HF_OFFLINE:-0}"
 export HF_CACHE_MODE="${HF_CACHE_MODE:-ephemeral}"
 export HF_EVICT_BETWEEN_MODELS="${HF_EVICT_BETWEEN_MODELS:-1}"

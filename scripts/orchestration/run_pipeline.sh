@@ -6,10 +6,10 @@
 # requests (partition, account, node/gpu counts, time limit, output paths)
 # as sbatch CLI flags rather than #SBATCH pragmas here, since CLI flags
 # override pragmas. Do not submit this file directly with sbatch; run a
-# wrapper with bash instead. HF_OFFLINE/HF_CACHE_MODE/HF_EVICT_BETWEEN_MODELS
-# are cluster-specific (network access, storage size) and are set by each
-# wrapper before it calls sbatch, not here - the fallbacks below only apply
-# if this is somehow invoked without going through a wrapper.
+# wrapper with bash instead. WORKDIR/HF_OFFLINE/HF_CACHE_MODE/
+# HF_EVICT_BETWEEN_MODELS are cluster-specific (filesystem layout, network
+# access, storage size) and are set by each wrapper before it calls sbatch,
+# not here.
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ if [[ -z "$SINGULARITY_BIN" ]]; then
     exit 127
 fi
 
-WORKDIR="/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-bench"
+WORKDIR="${WORKDIR:?WORKDIR is not set - run this via slurm_orchestrator.sh or deucalion_orchestrator.sh, which set it per-cluster (do not submit run_pipeline.sh directly)}"
 cd "$WORKDIR"
 
 export SIF="med-llm-bench.sif"
@@ -48,7 +48,7 @@ HF_EVICT_BETWEEN_MODELS="${HF_EVICT_BETWEEN_MODELS:-0}"
 
 SERVE_PORT="${SERVE_PORT:-8000}"
 RAY_PORT="${RAY_PORT:-6379}"
-JUDGE_MODEL_CONFIG="${JUDGE_MODEL_CONFIG:-configs/models/judges/medgemma_27b_it_judge.yaml}"
+JUDGE_MODEL_CONFIG="${JUDGE_MODEL_CONFIG:-configs/models/judges/deepseek_v4_flash_judge.yaml}"
 RUN_CONFIG="${RUN_CONFIG:-configs/runs/full_production.yaml}"
 
 extract_first_int() {
