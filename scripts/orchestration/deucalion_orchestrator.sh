@@ -12,6 +12,11 @@ export WORKDIR="${WORKDIR:-/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-b
 export HF_OFFLINE="${HF_OFFLINE:-1}"
 export HF_CACHE_MODE="${HF_CACHE_MODE:-persistent}"
 export HF_EVICT_BETWEEN_MODELS="${HF_EVICT_BETWEEN_MODELS:-0}"
+# The populated HF cache lives outside the project directory (a sibling of
+# WORKDIR, not inside it) - run_pipeline.sh's own default ($WORKDIR/.cache/
+# huggingface) points at a directory that doesn't exist here, which would
+# fail every model load under HF_OFFLINE=1 with no download fallback.
+export HF_HOME="${HF_HOME:-$(dirname "$WORKDIR")/.cache/huggingface}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -23,7 +28,7 @@ sbatch \
     --gpus=4 \
     --ntasks=1 \
     --cpus-per-task=128 \
-    --time=06:00:00 \
+    --time=08:00:00 \
     --output=logs/orchestration/out/deucalion_orchestrator_%j.out \
     --error=logs/orchestration/err/deucalion_orchestrator_%j.err \
     "$SCRIPT_DIR/run_pipeline.sh"

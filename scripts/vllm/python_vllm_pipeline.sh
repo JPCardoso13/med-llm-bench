@@ -1,11 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=python_vllm
-#SBATCH --partition=rtx4060
-#SBATCH --account=haslab
-#SBATCH --nodes=2
-#SBATCH --time=02:00:00
-#SBATCH --output=logs/python_vllm/out/python_vllm_%j.out
-#SBATCH --error=logs/python_vllm/err/python_vllm_%j.err
+# Shared SLURM job body for launching an ad-hoc Python script inside the
+# vLLM/Ray container environment (e.g. one-off vLLM smoke tests, GPU-side
+# preprocessing). Submitted via sbatch by a per-cluster wrapper
+# (python_vllm_deucalion.sh for A100/deucalion, python_vllm_slurm.sh for
+# rtx4060/haslab) - those wrappers pass all cluster-specific resource
+# requests (partition, account, node count, time limit, output paths) as
+# sbatch CLI flags rather than #SBATCH pragmas here, mirroring
+# run_pipeline.sh/deucalion_orchestrator.sh/slurm_orchestrator.sh. Do not
+# submit this file directly with sbatch; run a wrapper with bash instead.
+# WORKDIR/HF_OFFLINE are cluster-specific and are set by each wrapper before
+# it calls sbatch, not here.
 
 set -euo pipefail
 
@@ -13,14 +17,16 @@ PYTHON_SCRIPT="$1"
 shift
 PYTHON_ARGS=("$@")
 
-WORKDIR="/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-bench"
+WORKDIR="${WORKDIR:?WORKDIR is not set - run this via python_vllm_deucalion.sh or python_vllm_slurm.sh, which set it per-cluster (do not submit python_vllm_pipeline.sh directly)}"
 cd "$WORKDIR"
 
 SIF="med-llm-bench.sif"
-export HF_HOME="${HF_HOME:-$WORKDIR/.cache/huggingface}"
+# The populated HF cache lives outside the project directory (a sibling of
+# WORKDIR, not inside it) - see run_pipeline.sh for the same fix.
+export HF_HOME="${HF_HOME:-$(dirname "$WORKDIR")/.cache/huggingface}"
 mkdir -p "$HF_HOME" logs/vllm_setup
 
-HF_OFFLINE="${HF_OFFLINE:-1}"
+HF_OFFLINE="${HF_OFFLINE:-0}"
 if [[ "$HF_OFFLINE" == "1" ]]; then
     export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1
 else

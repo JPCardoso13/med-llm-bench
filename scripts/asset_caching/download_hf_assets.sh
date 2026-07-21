@@ -16,7 +16,9 @@ WORKDIR="/projects/F202500001HPCVLABEPICURE/jcardoso/med-llm-bench"
 cd "$WORKDIR"
 
 SIF="med-llm-bench.sif"
-HF_HOME="${HF_HOME:-$WORKDIR/.cache/huggingface}"
+# See deucalion_orchestrator.sh: the populated HF cache is a sibling of
+# WORKDIR, not inside it.
+HF_HOME="${HF_HOME:-$(dirname "$WORKDIR")/.cache/huggingface}"
 
 mkdir -p "$HF_HOME" "$HF_HOME/hub" "$HF_HOME/datasets" logs/hf_download/out logs/hf_download/err
 
@@ -29,4 +31,4 @@ export SINGULARITYENV_HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}
 
 echo "Downloading Hugging Face assets into: $HF_HOME"
 
-singularity exec --env-file .env "$SIF" python3 scripts/asset_caching/download_hf_assets.py
+singularity exec --env-file .env "$SIF" python3 scripts/asset_caching/download_hf_assets.py "$@"
