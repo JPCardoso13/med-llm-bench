@@ -53,5 +53,8 @@ metrics:
   # Systems-level metric profile consumed by metrics calculator.
   systems_profile: configs/metrics/systems.yaml
   # Cognitive metrics profile for evaluation (accuracy, parsing, etc).
-  cognitive_profile: configs/metrics/cognitive.template.yaml
+  # No standalone template profile exists right now - point this at whichever
+  # real profile matches your new task's task_type (cognitive.mcq.yaml for
+  # mcq, cognitive.generative.yaml for generative) as a starting point.
+  cognitive_profile: configs/metrics/cognitive.mcq.yaml
 

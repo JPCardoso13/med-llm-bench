@@ -187,6 +187,30 @@ def _build_group_by_breakdown(
     return breakdown
 
 
+def _build_similarity_scorer(metric_cfg: Mapping[str, Any]):
+    """Returns a (predicted, reference) -> score function for one similarity.metrics entry.
+
+    exact_match/token_f1 return a float; rouge returns {variant: float} - the
+    caller routes each shape into its own aggregation bucket.
+    """
+    name = metric_cfg.get("name")
+    if name == "exact_match":
+        return lambda predicted, reference: (
+            1.0 if _normalize_text(predicted, metric_cfg) == _normalize_text(reference, metric_cfg) else 0.0
+        )
+    if name == "token_f1":
+        return lambda predicted, reference: _token_f1_score(
+            _normalize_text(predicted, metric_cfg), _normalize_text(reference, metric_cfg)
+        )
+    if name == "rouge":
+        variants = list(metric_cfg.get("variants", ["rouge1", "rouge2", "rougeL"]))
+        scorer = rouge_scorer.RougeScorer(variants, use_stemmer=bool(metric_cfg.get("use_stemmer", True)))
+        return lambda predicted, reference: {
+            variant: scorer.score(reference, predicted)[variant].fmeasure for variant in variants
+        }
+    raise ValueError(f"Unsupported similarity metric: {name}")
+
+
 def _summarize_generative_group(
     results: list[BenchmarkResult],
     profile: Mapping[str, Any],
@@ -194,36 +218,33 @@ def _summarize_generative_group(
     missing_ref_fields: list[dict[str, Any]],
     dataset: str,
 ) -> dict[str, Any]:
-    generative_cfg = profile.get("generative", {})
-    if not generative_cfg.get("enabled", True):
-        return {}
-
-    exact_match_cfg = generative_cfg.get("exact_match", {})
-    exact_match_enabled = bool(exact_match_cfg.get("enabled", True))
-
-    answer_token_f1_cfg = generative_cfg.get("answer_token_f1", {})
-    answer_token_f1_enabled = bool(answer_token_f1_cfg.get("enabled", True))
-
-    rouge_cfg = generative_cfg.get("rouge", {})
-    rouge_enabled = bool(rouge_cfg.get("enabled", False))
-    rouge_variants = list(rouge_cfg.get("variants", ["rouge1", "rouge2", "rougeL"]))
-    rouge_scorer_instance = (
-        rouge_scorer.RougeScorer(rouge_variants, use_stemmer=bool(rouge_cfg.get("use_stemmer", True)))
-        if rouge_enabled
-        else None
-    )
-
     similarity_cfg = profile.get("similarity", {})
     similarity_enabled = bool(similarity_cfg.get("enabled", True))
-    expl_token_f1_cfg = similarity_cfg.get("token_f1", {})
-    expl_token_f1_enabled = similarity_enabled and bool(expl_token_f1_cfg.get("enabled", True))
 
+    # (target, metric_name, scorer_fn, is_rouge, variants) per active metric,
+    # scorers built once up front rather than per-sample.
+    active_metrics: list[tuple[str, str, Any, bool, list[str]]] = []
+    if similarity_enabled:
+        for metric_cfg in similarity_cfg.get("metrics", []):
+            if not bool(metric_cfg.get("enabled", True)):
+                continue
+            is_rouge = metric_cfg.get("name") == "rouge"
+            variants = list(metric_cfg.get("variants", ["rouge1", "rouge2", "rougeL"])) if is_rouge else []
+            active_metrics.append(
+                (metric_cfg["target"], metric_cfg["name"], _build_similarity_scorer(metric_cfg), is_rouge, variants)
+            )
+
+    include_parsing_summary = bool(profile.get("include_parsing_summary", True))
     reporting_cfg = profile.get("reporting", {})
 
-    answer_exact_scores: list[float] = []
-    answer_token_f1_scores: list[float] = []
-    explanation_token_f1_scores: list[float] = []
-    rouge_scores: dict[str, list[float]] = {variant: [] for variant in rouge_variants}
+    # (target, name) -> list of scores, for exact_match/token_f1 style metrics.
+    scalar_scores: dict[tuple[str, str], list[float]] = {
+        (target, name): [] for target, name, _, is_rouge, _ in active_metrics if not is_rouge
+    }
+    # target -> variant -> list of scores, for rouge.
+    rouge_scores: dict[str, dict[str, list[float]]] = {
+        target: {variant: [] for variant in variants} for target, _, _, is_rouge, variants in active_metrics if is_rouge
+    }
 
     evaluated_count = 0
     parsed_count = 0
@@ -232,7 +253,6 @@ def _summarize_generative_group(
 
     for result in results:
         ref_answer = str(result.ref_fields.get("answer", "")).strip()
-        ref_reasoning = str(result.ref_fields.get("ref_reasoning", "")).strip()
 
         if not ref_answer:
             missing_ref_fields.append(
@@ -253,8 +273,7 @@ def _summarize_generative_group(
             continue
 
         extracted = _extract_generative_response(result.response, profile)
-        predicted_answer = extracted["final_answer"]
-        predicted_explanation = extracted["explanation"]
+        predicted_answer = extracted.get("answer")
         answer_contaminated = bool(extracted.get("answer_contaminated", False))
 
         if predicted_answer is None:
@@ -263,7 +282,7 @@ def _summarize_generative_group(
                     "sample_id": result.sample_id,
                     "dataset": dataset,
                     "status": "missing",
-                    "missing_fields": ["final_answer"],
+                    "missing_fields": ["answer"],
                 }
             )
             per_sample_rows.append(
@@ -271,7 +290,7 @@ def _summarize_generative_group(
                     "sample_id": result.sample_id,
                     "dataset": dataset,
                     "status": "parse_failure",
-                    "missing_fields": ["final_answer"],
+                    "missing_fields": ["answer"],
                 }
             )
             continue
@@ -281,41 +300,27 @@ def _summarize_generative_group(
         if answer_contaminated:
             contaminated_count += 1
 
-        answer_exact = None
-        if exact_match_enabled:
-            answer_exact = (
-                1.0 if _normalize_text(predicted_answer, exact_match_cfg) == _normalize_text(ref_answer, exact_match_cfg) else 0.0
-            )
-            answer_exact_scores.append(answer_exact)
+        sample_scores: dict[str, dict[str, Any]] = {}
+        for target, name, scorer_fn, is_rouge, _ in active_metrics:
+            predicted = extracted.get(target)
+            reference = str(result.ref_fields.get(target, "")).strip()
+            if not predicted or not reference:
+                continue
+            score = scorer_fn(predicted, reference)
+            sample_scores.setdefault(target, {})[name] = score
+            if is_rouge:
+                for variant, value in score.items():
+                    rouge_scores[target][variant].append(value)
+            else:
+                scalar_scores[(target, name)].append(score)
 
-        answer_f1 = None
-        if answer_token_f1_enabled:
-            answer_f1 = _token_f1_score(
-                _normalize_text(predicted_answer, answer_token_f1_cfg),
-                _normalize_text(ref_answer, answer_token_f1_cfg),
-            )
-            answer_token_f1_scores.append(answer_f1)
-
-        sample_rouge: dict[str, float] = {}
-        if rouge_scorer_instance is not None:
-            rouge_result = rouge_scorer_instance.score(ref_answer, predicted_answer)
-            for variant in rouge_variants:
-                sample_rouge[variant] = rouge_result[variant].fmeasure
-                rouge_scores[variant].append(sample_rouge[variant])
-
-        explanation_token_f1 = None
-        if expl_token_f1_enabled and ref_reasoning and predicted_explanation:
-            explanation_token_f1 = _token_f1_score(
-                _normalize_text(predicted_explanation, expl_token_f1_cfg),
-                _normalize_text(ref_reasoning, expl_token_f1_cfg),
-            )
-            explanation_token_f1_scores.append(explanation_token_f1)
-
-        composite_parts = [score for score in (answer_exact, answer_f1) if score is not None]
-        if composite_parts:
-            composite_score = sum(composite_parts) / len(composite_parts)
-        elif sample_rouge:
-            composite_score = sum(sample_rouge.values()) / len(sample_rouge)
+        answer_scores = sample_scores.get("answer", {})
+        scalar_answer_scores = [v for v in answer_scores.values() if isinstance(v, (int, float))]
+        answer_rouge = answer_scores.get("rouge")
+        if scalar_answer_scores:
+            composite_score = sum(scalar_answer_scores) / len(scalar_answer_scores)
+        elif answer_rouge:
+            composite_score = sum(answer_rouge.values()) / len(answer_rouge)
         else:
             composite_score = 0.0
 
@@ -324,21 +329,21 @@ def _summarize_generative_group(
                 "sample_id": result.sample_id,
                 "dataset": dataset,
                 "status": "ok",
-                "answer_exact": answer_exact,
-                "answer_token_f1": answer_f1,
-                "rouge": sample_rouge or None,
+                "scores": sample_scores,
                 "format_ok": not answer_contaminated,
                 "answer_contaminated": answer_contaminated,
-                "explanation_token_f1": explanation_token_f1,
                 "composite_score": composite_score,
                 "response_preview": _safe_preview(result.response, reporting_cfg),
-                "final_answer": _safe_preview(predicted_answer, reporting_cfg),
                 "reference_answer": _safe_preview(ref_answer, reporting_cfg),
-                "explanation_preview": _safe_preview(predicted_explanation, reporting_cfg),
+                "extracted_preview": {
+                    target: _safe_preview(value, reporting_cfg)
+                    for target, value in extracted.items()
+                    if target != "answer_contaminated" and isinstance(value, str)
+                },
             }
         )
 
-    format_summary = {
+    format_summary: dict[str, Any] = {
         "parse_success_count": parsed_count,
         "parse_failure_count": len(parse_failures),
         "answer_contaminated_count": contaminated_count,
@@ -346,41 +351,29 @@ def _summarize_generative_group(
         "answer_clean_rate": (1.0 - (contaminated_count / parsed_count)) if parsed_count > 0 else None,
     }
 
-    answer_metrics: dict[str, Any] = {}
+    metrics_summary: dict[str, Any] = {}
+    if include_parsing_summary:
+        metrics_summary["format"] = format_summary
 
-    if exact_match_enabled:
-        answer_exact_summary = aggregate_values(answer_exact_scores, ["mean", "min", "max"])
-        answer_exact_summary["correct_count"] = int(sum(answer_exact_scores))
-        answer_exact_summary["evaluated_count"] = len(answer_exact_scores)
-        answer_exact_summary["accuracy"] = (
-            answer_exact_summary["correct_count"] / answer_exact_summary["evaluated_count"]
-            if answer_exact_summary["evaluated_count"] > 0
-            else None
-        )
-        answer_metrics["exact_match"] = answer_exact_summary
+    for (target, name), scores in scalar_scores.items():
+        summary_stats = aggregate_values(scores, ["mean", "min", "max"])
+        summary_stats["evaluated_count"] = len(scores)
+        if name == "exact_match":
+            summary_stats["correct_count"] = int(sum(scores))
+            summary_stats["accuracy"] = (
+                summary_stats["correct_count"] / summary_stats["evaluated_count"]
+                if summary_stats["evaluated_count"] > 0
+                else None
+            )
+        metrics_summary.setdefault(target, {})[name] = summary_stats
 
-    if answer_token_f1_enabled:
-        answer_token_f1_summary = aggregate_values(answer_token_f1_scores, ["mean", "min", "max"])
-        answer_token_f1_summary["evaluated_count"] = len(answer_token_f1_scores)
-        answer_metrics["token_f1"] = answer_token_f1_summary
-
-    metrics_summary: dict[str, Any] = {
-        "answer": answer_metrics,
-        "format": format_summary,
-    }
-
-    if rouge_scorer_instance is not None:
+    for target, variants in rouge_scores.items():
         rouge_summary: dict[str, Any] = {}
-        for variant, scores in rouge_scores.items():
+        for variant, scores in variants.items():
             variant_summary = aggregate_values(scores, ["mean", "min", "max"])
             variant_summary["evaluated_count"] = len(scores)
             rouge_summary[variant] = variant_summary
-        metrics_summary["rouge"] = rouge_summary
-
-    if expl_token_f1_enabled:
-        explanation_token_f1_summary = aggregate_values(explanation_token_f1_scores, ["mean", "min", "max"])
-        explanation_token_f1_summary["evaluated_count"] = len(explanation_token_f1_scores)
-        metrics_summary["explanation"] = {"token_f1": explanation_token_f1_summary}
+        metrics_summary.setdefault(target, {})["rouge"] = rouge_summary
 
     summary = {
         "dataset": dataset,
@@ -438,19 +431,26 @@ def _safe_preview(value: str | None, cfg: Mapping[str, Any]) -> str:
 
 
 def _extract_generative_response(response: str, profile: Mapping[str, Any]) -> dict[str, Any]:
+    # Generic over however many sections `extraction:` declares (today: just
+    # "answer" for SRC, "answer" + "ref_reasoning" for OECR) - a section name
+    # here must match a similarity metric's `target` and a
+    # BenchmarkResult.ref_fields key to actually get scored.
     cleaned = clean_response_text(response)
     extraction_cfg = profile.get("extraction", {})
-    final_answer_cfg = extraction_cfg.get("final_answer", {})
-    final_answer = _extract_section(cleaned, final_answer_cfg)
-    explanation = _extract_section(cleaned, extraction_cfg.get("explanation", {}))
-    on_multiline = str(final_answer_cfg.get("on_multiline", "truncate_first_line"))
-    contamination_markers = list(final_answer_cfg.get("contamination_markers", []))
-    final_answer, answer_contaminated = _normalize_final_answer(final_answer, on_multiline, contamination_markers)
-    return {
-        "final_answer": final_answer,
-        "explanation": explanation,
-        "answer_contaminated": answer_contaminated,
-    }
+    extracted: dict[str, Any] = {}
+    for section_name, section_cfg in extraction_cfg.items():
+        extracted[section_name] = _extract_section(cleaned, section_cfg)
+
+    # Contamination/multiline handling is answer-specific: it's about
+    # detecting the model bleeding a second section into the answer capture,
+    # which only makes sense for the primary "answer" section.
+    answer_cfg = extraction_cfg.get("answer", {})
+    on_multiline = str(answer_cfg.get("on_multiline", "truncate_first_line"))
+    contamination_markers = list(answer_cfg.get("contamination_markers", []))
+    answer, answer_contaminated = _normalize_final_answer(extracted.get("answer"), on_multiline, contamination_markers)
+    extracted["answer"] = answer
+    extracted["answer_contaminated"] = answer_contaminated
+    return extracted
 
 
 def _extract_section(text: str, section_cfg: Mapping[str, Any]) -> str | None:
@@ -561,11 +561,11 @@ def _summarize_mcq_group(
     if not mcq_cfg.get("enabled", True):
         return {}
 
-    enable_accuracy = bool(mcq_cfg.get("accuracy", {}).get("enabled", True))
-    enable_precision = bool(mcq_cfg.get("precision", {}).get("enabled", True))
-    enable_recall = bool(mcq_cfg.get("recall", {}).get("enabled", True))
-    enable_f1 = bool(mcq_cfg.get("f1", {}).get("enabled", True))
-    enable_parsing = bool(mcq_cfg.get("parsing", {}).get("enabled", True))
+    enable_accuracy = bool(mcq_cfg.get("accuracy", True))
+    enable_precision = bool(mcq_cfg.get("precision", True))
+    enable_recall = bool(mcq_cfg.get("recall", True))
+    enable_f1 = bool(mcq_cfg.get("f1", True))
+    enable_parsing_summary = bool(profile.get("include_parsing_summary", True))
     reporting_cfg = profile.get("reporting", {})
     answer_patterns = list(profile.get("extraction", {}).get("answer_patterns", []))
 
@@ -671,7 +671,7 @@ def _summarize_mcq_group(
         if enable_f1:
             summary["f1"] = classification_summary["f1"]
 
-    if enable_parsing:
+    if enable_parsing_summary:
         summary["parsing"] = {
             "parsed_success_count": parsed_success_count,
             "parse_failure_count": parse_failure_count,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from typing import Any, Iterable, Mapping
-from typing import Any, Iterable, Mapping
 
 from llm_bench.metrics.stats import aggregate_values, percentile
 from llm_bench.schemas.benchmark_result import BenchmarkResult
@@ -35,18 +34,26 @@ def calculate_system_metrics(results: list[BenchmarkResult], profile: Mapping[st
             )
         )
 
+    quality = _build_quality_summary(
+        missing_fields=missing_fields,
+        invalid_throughput_samples=invalid_throughput_samples,
+        profile=profile,
+    )
+
+    fail_on_missing_fields = bool(profile.get("quality_checks", {}).get("fail_on_missing_fields", False))
+    if fail_on_missing_fields and quality["missing_field_count"] > 0:
+        raise ValueError(
+            "System metrics failed: missing fields detected "
+            f"({quality['missing_field_count']} samples)."
+        )
+
     return {
         "profile_id": profile.get("profile_id", "systems"),
-        "schema_version": profile.get("schema_version", 1),
         "scope": profile.get("scope", "systems"),
         "enabled": True,
         "sample_count": len(results),
         "groups": group_summaries,
-        "quality": _build_quality_summary(
-            missing_fields=missing_fields,
-            invalid_throughput_samples=invalid_throughput_samples,
-            profile=profile,
-        ),
+        "quality": quality,
     }
 
 
@@ -274,9 +281,6 @@ def _build_quality_summary(
     quality_cfg = profile.get("quality_checks", {})
     return {
         "fail_on_missing_fields": bool(quality_cfg.get("fail_on_missing_fields", False)),
-        "require_system_telemetry_ok": bool(quality_cfg.get("require_system_telemetry_ok", False)),
-        "warn_on_empty_input": bool(quality_cfg.get("warn_on_empty_input", True)),
-        "warn_on_missing_telemetry": bool(quality_cfg.get("warn_on_missing_telemetry", True)),
         "missing_field_count": len(missing_fields),
         "invalid_throughput_sample_count": len(invalid_throughput_samples),
         "missing_fields": missing_fields[:200],

@@ -1,27 +1,25 @@
-schema_version: 1
-
 profile_id: cognitive.generative
 scope: cognitive
 task_type: generative
 
 enabled: true
 
-# Per-value metric breakdowns for whatever grouping fields a dataset config
-# actually defines (BenchmarkResult.grouping, from that dataset's
-# mapping.grouping block) - e.g. medcalcbench's calculator_name/category/
-# output_type/note_type. Nothing to name here; fields with no data for a
-# given dataset just don't appear.
+# Per-value breakdowns for whatever grouping fields the dataset defines -
+# auto-discovered, not named here.
 enable_grouping: true
 
+# Whether parsing-diagnostic counts appear in output. Not yet wired - the
+# calculator always includes this block today.
+include_parsing_summary: true
+
 extraction:
-  enabled: true
-  final_answer:
+  answer:
     pattern: (?is)final\s*answer[:\-\s]*(.*?)(?=\n\s*explanation\s*[:\-]|$)
     trim: true
-    # If the model bleeds an unlabeled "Explanation:" into the final-answer
-    # capture, cut it there and flag the sample as contaminated.
+    # Cuts an unlabeled "Explanation:" bleeding into the answer capture,
+    # flags the sample as contaminated.
     contamination_markers: [explanation]
-  explanation:
+  ref_reasoning:
     pattern: (?is)explanation[:\-\s]*(.*)$
     trim: true
 
@@ -34,29 +32,30 @@ reporting:
   include_text_preview: true
   text_preview_chars: 220
 
-mcq:
-  enabled: false
-
-generative:
-  enabled: true
-  exact_match:
-    enabled: true
-    target: answer
-    lowercase: true
-    normalize_whitespace: true
-    strip_punctuation: true
-  answer_token_f1:
-    enabled: true
-    target: answer
-    lowercase: true
-    normalize_whitespace: true
-    strip_punctuation: true
-
+# One list entry per text-comparison metric, each a (name, target) pair.
+# target must match a name under extraction: and a BenchmarkResult.ref_fields
+# key (today: answer, ref_reasoning). New metric = new entry, not a new block.
 similarity:
   enabled: true
-  token_f1:
-    enabled: true
-    target: explanation
+  metrics:
+    - name: exact_match
+      target: answer
+      enabled: false
+      lowercase: true
+      normalize_whitespace: true
+      strip_punctuation: true
+    - name: token_f1
+      target: answer
+      enabled: true
+      lowercase: true
+      normalize_whitespace: true
+      strip_punctuation: true
+    - name: token_f1
+      target: ref_reasoning
+      enabled: true
+      lowercase: true
+      normalize_whitespace: true
+      strip_punctuation: true
 
 llm_judge:
   enabled: true
@@ -74,5 +73,3 @@ llm_judge:
 
 quality_checks:
   fail_on_missing_ref_fields: false
-  warn_on_parse_failures: true
-  warn_on_extraction_ambiguity: true

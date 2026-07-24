@@ -1,4 +1,3 @@
-schema_version: 1
 profile_id: systems
 scope: systems
 
@@ -68,6 +67,3 @@ telemetry:
 
 quality_checks:
   fail_on_missing_fields: false
-  require_system_telemetry_ok: false
-  warn_on_empty_input: true
-  warn_on_missing_telemetry: true

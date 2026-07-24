@@ -1,33 +1,24 @@
-schema_version: 1
-
 profile_id: cognitive.generative.summarization
 scope: cognitive
 task_type: generative
 
 enabled: true
 
-# Per-value metric breakdowns for whatever grouping fields a dataset config
-# actually defines (BenchmarkResult.grouping, from that dataset's
-# mapping.grouping block) - e.g. multiclinsum's length_bin. Nothing to name
-# here; fields with no data for a given dataset (e.g. pubmedsum, which has
-# no mapping.grouping at all) just don't appear.
+# Per-value breakdowns for whatever grouping fields the dataset defines -
+# auto-discovered, not named here.
 enable_grouping: true
 
-# The whole response IS the summary, verbatim - no "Summary:" label to key
-# off of. src.yaml's system prompt explicitly instructs "no headers, no
-# commentary other than the summary itself", so a pattern requiring the
-# literal word "summary" (the original version of this pattern) never
-# matched anything and silently dropped every sample from every downstream
-# metric. No final_answer/explanation split either, since plain summaries
-# don't have that structure.
+# Whether parsing-diagnostic counts appear in output. Not yet wired - the
+# calculator always includes this block today.
+include_parsing_summary: true
+
+# Whole response IS the summary verbatim (src.yaml forbids headers). Unlike
+# a short QA answer, multi-line is legitimate content here, so on_multiline
+# joins instead of truncating.
 extraction:
-  enabled: true
-  final_answer:
+  answer:
     pattern: (?is)^(.*)$
     trim: true
-    # A multi-sentence summary spanning several lines is expected output here
-    # (unlike a short QA final-answer) - join lines instead of truncating to
-    # the first one so multi-line responses aren't scored on a fragment.
     on_multiline: join
 
 reporting:
@@ -39,33 +30,30 @@ reporting:
   include_text_preview: true
   text_preview_chars: 300
 
-mcq:
-  enabled: false
-
-generative:
-  enabled: true
-  # Exact match on a full free-text summary is meaningless (will sit at ~0%
-  # unless the model copies the reference verbatim) - disabled.
-  exact_match:
-    enabled: false
-  # Unigram token-overlap F1; useful as a cheap sanity signal but no credit
-  # for paraphrase/synonyms and no sequence-order sensitivity. ROUGE below is
-  # the primary early-stage quality metric for this task.
-  answer_token_f1:
-    enabled: true
-    target: answer
-    lowercase: true
-    normalize_whitespace: true
-    strip_punctuation: true
-  rouge:
-    enabled: true
-    variants: [rouge1, rouge2, rougeL]
-    use_stemmer: true
-    target: answer
-
-# No ref_reasoning/explanation field for this task; left disabled.
+# One list entry per text-comparison metric, each a (name, target) pair.
+# target must match a name under extraction: and a BenchmarkResult.ref_fields
+# key (today: answer, ref_reasoning). New metric = new entry, not a new block.
 similarity:
-  enabled: false
+  enabled: true
+  metrics:
+    - name: exact_match
+      target: answer
+      # Meaningless on a full free-text summary (~0% unless verbatim).
+      enabled: false
+      lowercase: true
+      normalize_whitespace: true
+      strip_punctuation: true
+    - name: token_f1
+      target: answer
+      enabled: true
+      lowercase: true
+      normalize_whitespace: true
+      strip_punctuation: true
+    - name: rouge
+      target: answer
+      enabled: true
+      variants: [rouge1, rouge2, rougeL]
+      use_stemmer: true
 
 llm_judge:
   enabled: true
@@ -80,5 +68,3 @@ llm_judge:
 
 quality_checks:
   fail_on_missing_ref_fields: false
-  warn_on_parse_failures: true
-  warn_on_extraction_ambiguity: true

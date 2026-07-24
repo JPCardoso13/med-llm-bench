@@ -36,10 +36,11 @@ def _extract_core_metrics(mcq: dict[str, Any] | None, generative_metrics: dict[s
                 out[key] = value
 
     if generative_metrics:
-        token_f1 = _extract_scalar(generative_metrics.get("answer", {}).get("token_f1", {}), "token_f1")
+        answer_metrics = generative_metrics.get("answer", {})
+        token_f1 = _extract_scalar(answer_metrics.get("token_f1", {}), "token_f1")
         if token_f1 is not None:
             out["token_f1"] = token_f1
-        for rouge_key, rouge_node in generative_metrics.get("rouge", {}).items():
+        for rouge_key, rouge_node in answer_metrics.get("rouge", {}).items():
             value = _extract_scalar(rouge_node, rouge_key)
             if value is not None:
                 out[rouge_key] = value
