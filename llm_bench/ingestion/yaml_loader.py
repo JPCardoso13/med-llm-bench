@@ -14,6 +14,13 @@ from .base_loader import BaseLoader
 logger = logging.getLogger(__name__)
 
 
+def _to_datasets_builder_name(ext: str) -> str:
+    """Map a raw file extension to the `datasets` library's actual builder
+    name where they differ - e.g. a '.txt' file's extension is 'txt', but
+    the builder name `load_dataset()` expects is 'text'."""
+    return "text" if ext == "txt" else ext
+
+
 class YamlLoader(BaseLoader):
     def __init__(self, config_path: str):
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -70,10 +77,12 @@ class YamlLoader(BaseLoader):
             if not target_path:
                 return []
             ext = "json" if target_path.endswith("jsonl") else target_path.split('.')[-1]
+            ext = _to_datasets_builder_name(ext)
             raw_data = load_dataset(ext, data_files=target_path, split="train")
         else:
             ext = "json" if str(self.data_files).endswith("jsonl") else str(self.data_files).split('.')[-1]
-            if ext not in ["json", "csv", "parquet", "txt"]:
+            ext = _to_datasets_builder_name(ext)
+            if ext not in ["json", "csv", "parquet", "text"]:
                 ext = "parquet" if "parquet" in str(self.data_files) else "json"
             raw_data = load_dataset(ext, data_files=self.data_files, split=split_name)
 
@@ -113,8 +122,6 @@ class YamlLoader(BaseLoader):
             seen_ids.add(final_id)
             mapped_data["id"] = final_id
 
-            mapped_data["source"] = ds_name
-
             try:
                 samples.append(self.schema_class(**mapped_data))
             except ValidationError as exc:
@@ -138,7 +145,7 @@ class YamlLoader(BaseLoader):
                 return f"{ds_name}:{source_id_str}"
 
         # Build a stable content-based ID from mapped fields, excluding runtime fields.
-        canonical_payload = {k: v for k, v in mapped_data.items() if k not in {"id", "source"}}
+        canonical_payload = {k: v for k, v in mapped_data.items() if k != "id"}
         payload_str = json.dumps(canonical_payload, sort_keys=True, default=str, ensure_ascii=True)
         digest = hashlib.sha1(payload_str.encode("utf-8")).hexdigest()[:16]
 

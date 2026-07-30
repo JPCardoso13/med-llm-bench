@@ -19,7 +19,7 @@ from scripts.orchestration.orchestrator import (
 )
 
 from llm_bench.judge import JudgeClient, build_judge_messages, build_judge_response_format, parse_judge_response
-from llm_bench.metrics import summarize_judge_group
+from llm_bench.metrics import summarize_judge_group, summarize_judge_agreement
 from llm_bench.schemas import BenchmarkResult
 
 JUDGED_RESULTS_DIR = Path("outputs/judged")
@@ -104,6 +104,10 @@ def run_task(judge_client: JudgeClient, task_cfg_path: Path) -> None:
             rows = judged_by_dataset.get(group["dataset"], [])
             group.setdefault("metrics", {})["llm_judge"] = summarize_judge_group(rows, rubric)
 
+            per_sample_scores = group["metrics"].get("generative", {}).get("per_sample_scores")
+            if per_sample_scores:
+                group["metrics"]["llm_judge"]["agreement"] = summarize_judge_agreement(rows, per_sample_scores, rubric)
+
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         print(f"  Cognitive summary updated: {summary_path}")
 
@@ -128,6 +132,8 @@ def main() -> None:
             base_url=handle.base_url,
             model_id=str(judge_cfg["model_id"]),
             api_key=os.getenv("LLM_API_KEY", "EMPTY"),
+            temperature=float(judge_cfg.get("temperature", 0.0)),
+            max_tokens=int(judge_cfg.get("max_tokens", 512)),
         )
 
         for task_cfg_path in discover_task_configs():

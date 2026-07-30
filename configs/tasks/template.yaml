@@ -41,6 +41,11 @@ execution:
   # Default generation length budget, used by any dataset in this task that
   # doesn't set its own max_tokens above.
   max_tokens: 1024
+  # Consecutive per-sample generation failures before the circuit breaker
+  # aborts the dataset (systemic failure, e.g. backend unreachable) rather
+  # than limping through - resets to 0 on every success. Optional, defaults
+  # to 5 if omitted.
+  max_consecutive_failures: 5
 
 runtime:
   # Runtime telemetry collection config (collector/endpoints/timeouts).

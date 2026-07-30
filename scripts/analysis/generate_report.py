@@ -10,6 +10,7 @@ from llm_bench.reporting import (
     load_systems_metrics,
     load_reliability_metrics,
     load_qualitative_examples,
+    load_label_bias,
     plot_headline_bar_chart,
     plot_grouped_metric_bar_chart,
     plot_group_by_heatmap,
@@ -19,6 +20,7 @@ from llm_bench.reporting import (
     pivot_group_by_table,
     pivot_judge_table,
     pivot_reliability_table,
+    pivot_label_bias_table,
     qualitative_examples_table,
     save_table,
     save_qualitative_examples,
@@ -47,11 +49,11 @@ TRADEOFF_QUALITY_METRIC = {"mcq": "accuracy", "generative": "token_f1"}
 # other - they're complementary, not redundant.
 TRADEOFF_X_METRICS = ["decoding_throughput", "total_latency_ms_p99"]
 
-# MCQ's three headline metrics get combined into one grouped chart instead of
-# three separate ones - small enough a set (see the dataviz skill's
+# MCQ's four headline metrics get combined into one grouped chart instead of
+# four separate ones - small enough a set (see the dataviz skill's
 # series-count ladder) that color-as-metric stays legible. Generative tasks
 # (token_f1/rouge*) are left as separate charts for now, not asked for yet.
-MCQ_METRIC_NAMES = {"accuracy", "precision", "recall"}
+MCQ_METRIC_NAMES = {"accuracy", "precision", "recall", "f1"}
 
 # Which group_by fields (matched by name, across whichever datasets happen
 # to expose them) get charted under subgroups/. Not every grouping field a
@@ -61,6 +63,14 @@ MCQ_METRIC_NAMES = {"accuracy", "precision", "recall"}
 # of axis (exam step, reasoning structure, calculator category, note
 # format, document length), not specialty. Add names here to bring any back.
 GROUP_BY_FIELDS = ["body_system"]
+
+# (rubric_item, label) pairs surfaced as reliability rates alongside
+# parse/truncation failures - a judge label is a bad-outcome rate worth
+# tracking as reliability, not just one more distribution to browse under
+# judge/. Only safety_flag/Unsafe qualifies today (OECR's rubric); the other
+# rubric items (diagnosis_correctness, reasoning_validity, coverage,
+# faithfulness) are quality gradients, not pass/fail signals.
+JUDGE_FLAG_RATES = [("safety_flag", "Unsafe")]
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,6 +171,21 @@ def build_reliability(reliability_df, out_dir: Path) -> None:
     print(f"  reliability/ done ({count} tables)")
 
 
+def build_label_bias(label_bias_df, out_dir: Path) -> None:
+    if label_bias_df.empty:
+        print("  bias/ skipped (no data - MCQ tasks only)")
+        return
+
+    count = 0
+    for (task_id, dataset), _ in label_bias_df.groupby(["task_id", "dataset"]):
+        cat_dir = _task_dir(out_dir, task_id, "bias")
+        table = pivot_label_bias_table(label_bias_df, task_id, dataset)
+        if not table.empty:
+            save_table(table, cat_dir, f"{dataset}_label_bias", caption=f"{task_id}/{dataset}: predicted vs. correct answer-letter share per model")
+            count += 1
+    print(f"  bias/ done ({count} tables)")
+
+
 def build_examples(examples_df, out_dir: Path) -> None:
     if examples_df.empty:
         print("  examples/ skipped (no data - MCQ tasks have no free-text response to preview)")
@@ -190,11 +215,12 @@ def main() -> None:
     group_df = load_group_by_metrics(reports_dir, fields=GROUP_BY_FIELDS)
     judge_df = load_judge_distributions(reports_dir)
     systems_df = load_systems_metrics(reports_dir)
-    reliability_df = load_reliability_metrics(reports_dir)
+    reliability_df = load_reliability_metrics(reports_dir, judge_flag_rates=JUDGE_FLAG_RATES)
     examples_df = load_qualitative_examples(reports_dir)
+    label_bias_df = load_label_bias(reports_dir)
 
     print(f"Loaded {len(headline_df)} headline / {len(group_df)} group_by / {len(judge_df)} judge / "
-          f"{len(systems_df)} systems / {len(reliability_df)} reliability rows, "
+          f"{len(systems_df)} systems / {len(reliability_df)} reliability / {len(label_bias_df)} label_bias rows, "
           f"{len(examples_df)} example previews.")
 
     build_comparison(headline_df, out_dir)
@@ -202,9 +228,10 @@ def main() -> None:
     build_judge(judge_df, out_dir)
     build_tradeoffs(systems_df, headline_df, out_dir)
     build_reliability(reliability_df, out_dir)
+    build_label_bias(label_bias_df, out_dir)
     build_examples(examples_df, out_dir)
 
-    print(f"\nDone. Output under {out_dir}/<task_id>/<comparison|subgroups|judge|tradeoffs|reliability|examples>/")
+    print(f"\nDone. Output under {out_dir}/<task_id>/<comparison|subgroups|judge|tradeoffs|reliability|bias|examples>/")
 
 
 if __name__ == "__main__":

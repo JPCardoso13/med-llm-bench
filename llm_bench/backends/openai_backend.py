@@ -1,3 +1,4 @@
+import math
 import time
 import re
 from datetime import datetime
@@ -59,6 +60,7 @@ class OpenAIBackend(BaseBackend):
             max_tokens=max_tokens,
             stream=True,
             stream_options={"include_usage": True},
+            logprobs=True,
             **self._extra_params,
         )
 
@@ -67,8 +69,6 @@ class OpenAIBackend(BaseBackend):
         messages: List[Dict[str, str]],
         sample_id: str,
         dataset: str,
-        task_name: str,
-        sample_type: str,
         ref_fields: dict,
         grouping: dict,
     ) -> BenchmarkResult:
@@ -80,6 +80,7 @@ class OpenAIBackend(BaseBackend):
         ttft_ms = None
         inter_token_latencies_ms = []
         chunks = []
+        token_logprobs: List[float] = []
         last_token_time = None
         backend_metrics = {}
 
@@ -121,6 +122,10 @@ class OpenAIBackend(BaseBackend):
             if finish_reason is not None:
                 backend_metrics["finish_reason"] = finish_reason
 
+            logprobs = chunk.choices[0].logprobs
+            if logprobs is not None and logprobs.content:
+                token_logprobs.extend(entry.logprob for entry in logprobs.content)
+
             delta = chunk.choices[0].delta.content
             if delta is None:
                 continue
@@ -134,6 +139,10 @@ class OpenAIBackend(BaseBackend):
             last_token_time = now
             chunks.append(delta)
 
+        if token_logprobs:
+            mean_logprob = sum(token_logprobs) / len(token_logprobs)
+            backend_metrics["perplexity"] = math.exp(-mean_logprob)
+
         total_latency_ms = (time.perf_counter() - request_start) * 1000
         response = "".join(chunks)
         usage = backend_metrics.get("usage")
@@ -146,8 +155,6 @@ class OpenAIBackend(BaseBackend):
         return BenchmarkResult(
             sample_id=sample_id,
             dataset=dataset,
-            task_name=task_name,
-            sample_type=sample_type,
             prompt=user_prompt,
             response=response,
             total_latency_ms=total_latency_ms,

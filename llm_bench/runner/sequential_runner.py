@@ -97,8 +97,6 @@ class SequentialRunner:
                         messages=messages,
                         sample_id=sample.id,
                         dataset=self._dataset_name,
-                        task_name=self._task_name,
-                        sample_type=request_context["sample_type"],
                         ref_fields=ref_fields,
                         grouping=grouping,
                     )
@@ -132,12 +130,6 @@ class SequentialRunner:
                 system_metrics = self._telemetry_collector.after_request(request_context)
                 if system_metrics:
                     result.backend_metrics.setdefault("system", {}).update(system_metrics)
-
-                capabilities = result.backend_metrics.setdefault("capabilities", {})
-                capabilities.setdefault("request_timing", True)
-                capabilities.setdefault("token_usage", "usage" in result.backend_metrics)
-                capabilities["system_telemetry"] = bool(system_metrics)
-                capabilities["system_telemetry_ok"] = not self._has_telemetry_issue(system_metrics)
 
                 if self._has_telemetry_issue(system_metrics):
                     telemetry_warning_count += 1

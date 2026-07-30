@@ -9,7 +9,7 @@ from rouge_score import rouge_scorer
 
 from llm_bench.metrics.answer_extraction import extract_mcq_answer_letter
 from llm_bench.metrics.answer_extraction import clean_response_text
-from llm_bench.metrics.stats import aggregate_values
+from llm_bench.metrics.stats import aggregate_values, spearman_correlation
 from llm_bench.schemas.benchmark_result import BenchmarkResult
 
 
@@ -32,6 +32,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
     ambiguous_extractions: list[dict[str, Any]] = []
     missing_ref_fields: list[dict[str, Any]] = []
     truncated: list[dict[str, Any]] = []
+    shrunk_budget_truncated: list[dict[str, Any]] = []
 
     group_summaries = []
     for dataset, group_results in groups.items():
@@ -44,6 +45,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
                 ambiguous_extractions=ambiguous_extractions,
                 missing_ref_fields=missing_ref_fields,
                 truncated=truncated,
+                shrunk_budget_truncated=shrunk_budget_truncated,
             )
         )
 
@@ -53,6 +55,7 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
         ambiguous_extractions=ambiguous_extractions,
         missing_ref_fields=missing_ref_fields,
         truncated=truncated,
+        shrunk_budget_truncated=shrunk_budget_truncated,
     )
 
     fail_on_missing_ref_fields = bool(profile.get("quality_checks", {}).get("fail_on_missing_ref_fields", False))
@@ -82,6 +85,7 @@ def _summarize_group(
     ambiguous_extractions: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
     truncated: list[dict[str, Any]],
+    shrunk_budget_truncated: list[dict[str, Any]],
 ) -> dict[str, Any]:
     group_parse_failures: list[dict[str, Any]] = []
     group_ambiguous_extractions: list[dict[str, Any]] = []
@@ -90,6 +94,19 @@ def _summarize_group(
         {"sample_id": result.sample_id, "dataset": dataset}
         for result in results
         if result.backend_metrics.get("finish_reason") == "length"
+    ]
+    # Subset of the above: truncated even after the adaptive shrink-retry
+    # already reduced the request's max_tokens below the configured default
+    # (openai_backend.py's _max_tokens_from_error) - a materially different
+    # diagnostic story than a sample that hit its full, unshrunk budget and
+    # still didn't finish.
+    group_shrunk_budget_truncated: list[dict[str, Any]] = [
+        {"sample_id": result.sample_id, "dataset": dataset}
+        for result in results
+        if result.backend_metrics.get("finish_reason") == "length"
+        and result.backend_metrics.get("max_tokens_used") is not None
+        and result.backend_metrics.get("max_tokens_configured") is not None
+        and result.backend_metrics["max_tokens_used"] < result.backend_metrics["max_tokens_configured"]
     ]
 
     group_summary: dict[str, Any] = {
@@ -117,17 +134,21 @@ def _summarize_group(
             missing_ref_fields=group_missing_ref_fields,
             dataset=dataset,
         )
+    else:
+        raise ValueError(f"Unsupported task_type: {task_type}")
 
     parse_failures.extend(group_parse_failures)
     ambiguous_extractions.extend(group_ambiguous_extractions)
     missing_ref_fields.extend(group_missing_ref_fields)
     truncated.extend(group_truncated)
+    shrunk_budget_truncated.extend(group_shrunk_budget_truncated)
 
     group_summary["quality"] = {
         "parse_failure_count": len(group_parse_failures),
         "ambiguous_extraction_count": len(group_ambiguous_extractions),
         "missing_ref_field_count": len(group_missing_ref_fields),
         "truncated_count": len(group_truncated),
+        "shrunk_budget_truncated_count": len(group_shrunk_budget_truncated),
     }
 
     if profile.get("enable_grouping", False):
@@ -235,7 +256,12 @@ def _summarize_generative_group(
             )
 
     include_parsing_summary = bool(profile.get("include_parsing_summary", True))
+    # output_tokens/input_tokens - only meaningful for tasks whose input is
+    # content to be condensed (summarization); off by default since it isn't
+    # a meaningful signal for e.g. a case-description-plus-question task.
+    enable_compression = bool(profile.get("compression", False))
     reporting_cfg = profile.get("reporting", {})
+    compression_ratios: list[float] = []
 
     # (target, name) -> list of scores, for exact_match/token_f1 style metrics.
     scalar_scores: dict[tuple[str, str], list[float]] = {
@@ -250,6 +276,12 @@ def _summarize_generative_group(
     parsed_count = 0
     contaminated_count = 0
     per_sample_rows: list[dict[str, Any]] = []
+    # sample_id -> target -> metric_name -> score. Compact machine-readable
+    # scores (no response text), kept separately from the diagnostics preview
+    # block above so downstream code (e.g. judge-vs-automatic agreement) can
+    # join against per-sample judge verdicts without needing
+    # reporting.include_per_sample turned on.
+    all_sample_scores: dict[str, dict[str, Any]] = {}
 
     for result in results:
         ref_answer = str(result.ref_fields.get("answer", "")).strip()
@@ -300,6 +332,11 @@ def _summarize_generative_group(
         if answer_contaminated:
             contaminated_count += 1
 
+        compression_ratio = None
+        if enable_compression and result.input_tokens > 0:
+            compression_ratio = result.output_tokens / result.input_tokens
+            compression_ratios.append(compression_ratio)
+
         sample_scores: dict[str, dict[str, Any]] = {}
         for target, name, scorer_fn, is_rouge, _ in active_metrics:
             predicted = extracted.get(target)
@@ -313,6 +350,9 @@ def _summarize_generative_group(
                     rouge_scores[target][variant].append(value)
             else:
                 scalar_scores[(target, name)].append(score)
+
+        if sample_scores:
+            all_sample_scores[result.sample_id] = sample_scores
 
         answer_scores = sample_scores.get("answer", {})
         scalar_answer_scores = [v for v in answer_scores.values() if isinstance(v, (int, float))]
@@ -333,6 +373,7 @@ def _summarize_generative_group(
                 "format_ok": not answer_contaminated,
                 "answer_contaminated": answer_contaminated,
                 "composite_score": composite_score,
+                "compression_ratio": compression_ratio,
                 "response_preview": _safe_preview(result.response, reporting_cfg),
                 "reference_answer": _safe_preview(ref_answer, reporting_cfg),
                 "extracted_preview": {
@@ -375,10 +416,16 @@ def _summarize_generative_group(
             rouge_summary[variant] = variant_summary
         metrics_summary.setdefault(target, {})["rouge"] = rouge_summary
 
+    if enable_compression:
+        compression_summary = aggregate_values(compression_ratios, ["mean", "min", "max"])
+        compression_summary["evaluated_count"] = len(compression_ratios)
+        metrics_summary["compression_ratio"] = compression_summary
+
     summary = {
         "dataset": dataset,
         "sample_count": len(results),
         "metrics": metrics_summary,
+        "per_sample_scores": all_sample_scores,
     }
 
     diagnostics = _build_generative_diagnostics(per_sample_rows, reporting_cfg)
@@ -565,6 +612,7 @@ def _summarize_mcq_group(
     enable_precision = bool(mcq_cfg.get("precision", True))
     enable_recall = bool(mcq_cfg.get("recall", True))
     enable_f1 = bool(mcq_cfg.get("f1", True))
+    enable_label_bias = bool(mcq_cfg.get("label_bias", True))
     enable_parsing_summary = bool(profile.get("include_parsing_summary", True))
     reporting_cfg = profile.get("reporting", {})
     answer_patterns = list(profile.get("extraction", {}).get("answer_patterns", []))
@@ -575,6 +623,11 @@ def _summarize_mcq_group(
     parse_failure_count = 0
     ambiguous_count = 0
     label_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0})
+    # Distribution of what got predicted vs. what was actually correct - a
+    # model that leans on one letter regardless of the question (positional/
+    # label bias) shows up here even when accuracy alone looks fine.
+    predicted_letter_counts: dict[str, int] = defaultdict(int)
+    reference_letter_counts: dict[str, int] = defaultdict(int)
     per_sample_rows: list[dict[str, Any]] = []
 
     for result in results:
@@ -625,8 +678,10 @@ def _summarize_mcq_group(
             )
 
         evaluated_count += 1
+        reference_letter_counts[ref_answer] += 1
         if pred is not None:
             label_stats.setdefault(pred, {"tp": 0, "fp": 0, "fn": 0})
+            predicted_letter_counts[pred] += 1
 
         is_correct = pred is not None and pred == ref_answer
         if is_correct:
@@ -670,6 +725,23 @@ def _summarize_mcq_group(
 
         if enable_f1:
             summary["f1"] = classification_summary["f1"]
+
+    if enable_label_bias:
+        all_letters = sorted(set(predicted_letter_counts) | set(reference_letter_counts))
+        predicted_total = sum(predicted_letter_counts.values())
+        reference_total = sum(reference_letter_counts.values())
+        summary["label_distribution"] = {
+            "predicted": {letter: predicted_letter_counts.get(letter, 0) for letter in all_letters},
+            "predicted_pct": {
+                letter: (predicted_letter_counts.get(letter, 0) / predicted_total) if predicted_total > 0 else None
+                for letter in all_letters
+            },
+            "reference": {letter: reference_letter_counts.get(letter, 0) for letter in all_letters},
+            "reference_pct": {
+                letter: (reference_letter_counts.get(letter, 0) / reference_total) if reference_total > 0 else None
+                for letter in all_letters
+            },
+        }
 
     if enable_parsing_summary:
         summary["parsing"] = {
@@ -787,20 +859,21 @@ def _build_quality_summary(
     ambiguous_extractions: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
     truncated: list[dict[str, Any]],
+    shrunk_budget_truncated: list[dict[str, Any]],
 ) -> dict[str, Any]:
     quality_cfg = profile.get("quality_checks", {})
     return {
         "fail_on_missing_ref_fields": bool(quality_cfg.get("fail_on_missing_ref_fields", False)),
-        "warn_on_parse_failures": bool(quality_cfg.get("warn_on_parse_failures", True)),
-        "warn_on_extraction_ambiguity": bool(quality_cfg.get("warn_on_extraction_ambiguity", True)),
         "parse_failure_count": len(parse_failures),
         "ambiguous_extraction_count": len(ambiguous_extractions),
         "missing_ref_field_count": len(missing_ref_fields),
         "truncated_count": len(truncated),
+        "shrunk_budget_truncated_count": len(shrunk_budget_truncated),
         "parse_failures": parse_failures[:200],
         "ambiguous_extractions": ambiguous_extractions[:200],
         "missing_ref_fields": missing_ref_fields[:200],
         "truncated": truncated[:200],
+        "shrunk_budget_truncated": shrunk_budget_truncated[:200],
     }
 
 
@@ -846,3 +919,83 @@ def summarize_judge_group(judge_rows: list[Mapping[str, Any]], rubric: Mapping[s
         "parse_success_rate": ((sample_count - parse_failure_count) / sample_count) if sample_count > 0 else None,
         "items": items,
     }
+
+
+def _flatten_target_scores(target_scores: Mapping[str, Any]) -> dict[str, float]:
+    """{"token_f1": 0.6, "rouge": {"rouge1": 0.7, ...}} -> {"token_f1": 0.6,
+    "rouge.rouge1": 0.7, ...} - rouge is the only multi-valued metric today."""
+    flat: dict[str, float] = {}
+    for name, value in target_scores.items():
+        if isinstance(value, dict):
+            for variant, sub_value in value.items():
+                if isinstance(sub_value, (int, float)):
+                    flat[f"{name}.{variant}"] = sub_value
+        elif isinstance(value, (int, float)):
+            flat[name] = value
+    return flat
+
+
+def summarize_judge_agreement(
+    judge_rows: list[Mapping[str, Any]],
+    per_sample_scores: Mapping[str, Mapping[str, Any]],
+    rubric: Mapping[str, Any],
+    target: str = "answer",
+) -> dict[str, Any]:
+    """Cross-references per-sample LLM-judge verdicts against per-sample
+    automatic metric scores for the same target (default "answer", the
+    primary quality signal) - does the judge's verdict move with the
+    automatic score, or are they measuring different things.
+
+    judge_rows / rubric: same shapes summarize_judge_group takes.
+    per_sample_scores: cognitive_summary.json's per-generative-group
+    "per_sample_scores" block (sample_id -> target -> metric_name -> score).
+
+    Ordinal label encoding uses each label's position in the rubric's own
+    `labels:` list - the same order already used for judge chart/table
+    ordering elsewhere, not a re-guessed "which direction is better."
+    Correlation is Spearman (rank-based), appropriate for a small ordinal
+    label set against a continuous automatic score - see
+    llm_bench/metrics/stats.py:spearman_correlation.
+    """
+    judge_by_sample = {row["sample_id"]: row for row in judge_rows}
+
+    agreement: dict[str, Any] = {}
+    for item_name, item_cfg in rubric.items():
+        if not item_cfg.get("enabled", True):
+            continue
+        labels = list(item_cfg.get("labels", []))
+        label_rank = {label: i for i, label in enumerate(labels)}
+
+        pairs_by_metric: dict[str, list[tuple[int, float]]] = defaultdict(list)
+        for sample_id, target_scores in per_sample_scores.items():
+            judge_row = judge_by_sample.get(sample_id)
+            if judge_row is None:
+                continue
+            label = judge_row.get("scores", {}).get(item_name)
+            if label is None or label not in label_rank:
+                continue
+            for metric_name, score in _flatten_target_scores(target_scores.get(target, {})).items():
+                pairs_by_metric[metric_name].append((label_rank[label], score))
+
+        if not pairs_by_metric:
+            continue
+
+        item_agreement: dict[str, Any] = {}
+        for metric_name, pairs in pairs_by_metric.items():
+            ordinals = [pair[0] for pair in pairs]
+            scores = [pair[1] for pair in pairs]
+            scores_by_label: dict[str, list[float]] = defaultdict(list)
+            for ordinal, score in pairs:
+                scores_by_label[labels[ordinal]].append(score)
+
+            item_agreement[metric_name] = {
+                "paired_count": len(pairs),
+                "spearman": spearman_correlation(ordinals, scores),
+                "mean_by_label": {
+                    label: (sum(scores_by_label[label]) / len(scores_by_label[label])) if scores_by_label[label] else None
+                    for label in labels
+                },
+            }
+        agreement[item_name] = item_agreement
+
+    return agreement

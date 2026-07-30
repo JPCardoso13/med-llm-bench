@@ -38,6 +38,10 @@ mcq:
   precision: true
   recall: true
   f1: true
+  # Predicted-letter vs. correct-letter distribution - surfaces a model
+  # leaning on one option regardless of the question, which accuracy alone
+  # can hide.
+  label_bias: true
 
 llm_judge:
   enabled: false

@@ -58,3 +58,44 @@ def aggregate_values(values: Iterable[float], aggregates: Sequence[str], percent
         summary[f"p{pct}"] = percentile(numbers, float(pct))
 
     return summary
+
+
+def _average_ranks(values: Sequence[float]) -> list[float]:
+    """1-indexed ranks, tied values receiving the average of the ranks they span."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        average_rank = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = average_rank
+        i = j + 1
+    return ranks
+
+
+def spearman_correlation(x: Sequence[float], y: Sequence[float]) -> float | None:
+    """Spearman's rank correlation - Pearson correlation computed on ranks
+    instead of raw values, with average-rank tie handling (ties are expected
+    here: judge labels are a small ordinal set, not continuous data).
+    Dependency-free (no scipy) to match this module's existing style.
+    Returns None if there are fewer than 2 pairs or either side is constant
+    (undefined correlation, not zero).
+    """
+    if len(x) != len(y) or len(x) < 2:
+        return None
+
+    rank_x = _average_ranks(list(x))
+    rank_y = _average_ranks(list(y))
+    mean_x = mean(rank_x)
+    mean_y = mean(rank_y)
+
+    covariance = sum((a - mean_x) * (b - mean_y) for a, b in zip(rank_x, rank_y))
+    variance_x = sum((a - mean_x) ** 2 for a in rank_x)
+    variance_y = sum((b - mean_y) ** 2 for b in rank_y)
+    if variance_x == 0 or variance_y == 0:
+        return None
+
+    return covariance / (variance_x ** 0.5 * variance_y ** 0.5)

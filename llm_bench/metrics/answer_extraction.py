@@ -30,7 +30,6 @@ def extract_mcq_answer_letter(text: str, patterns: list[str]) -> dict[str, Any]:
     - letter: extracted answer letter or None
     - status: one of success | ambiguous | missing
     - candidates: ordered unique candidate letters found
-    - cleaned_text: response text after removing think blocks
     """
     cleaned = clean_response_text(text)
 
@@ -49,7 +48,6 @@ def extract_mcq_answer_letter(text: str, patterns: list[str]) -> dict[str, Any]:
             "letter": None,
             "status": "missing",
             "candidates": [],
-            "cleaned_text": cleaned,
         }
 
     if len(candidates) == 1:
@@ -57,12 +55,10 @@ def extract_mcq_answer_letter(text: str, patterns: list[str]) -> dict[str, Any]:
             "letter": candidates[0],
             "status": "success",
             "candidates": candidates,
-            "cleaned_text": cleaned,
         }
 
     return {
         "letter": None,
         "status": "ambiguous",
         "candidates": candidates,
-        "cleaned_text": cleaned,
     }

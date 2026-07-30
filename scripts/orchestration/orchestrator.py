@@ -138,6 +138,7 @@ def build_formatter(task_cfg: dict[str, Any]):
             user_turn_template=prompt_cfg["user_turn_template"],
             fewshot_template=prompt_cfg.get("fewshot_template"),
             fewshot_header=prompt_cfg.get("fewshot_header"),
+            fewshot_delimiter=prompt_cfg.get("fewshot_delimiter", "\n\n"),
         )
 
     if task_type == "generative":
@@ -145,6 +146,7 @@ def build_formatter(task_cfg: dict[str, Any]):
             system_prompt=prompt_cfg["system_prompt"],
             user_turn_template=prompt_cfg["user_turn_template"],
             fewshot_template=prompt_cfg.get("fewshot_template"),
+            fewshot_delimiter=prompt_cfg.get("fewshot_delimiter", "\n\n"),
         )
 
     raise ValueError(f"Unsupported task_type: {task_type}")
@@ -228,6 +230,7 @@ def run_benchmark_for_model(
     flush_every = int(task_cfg.get("execution", {}).get("flush_every", 10))
     fewshot_seed = task_cfg.get("execution", {}).get("fewshot_seed")
     fewshot_seed = int(fewshot_seed) if fewshot_seed is not None else None
+    max_consecutive_failures = int(task_cfg.get("execution", {}).get("max_consecutive_failures", 5))
     task_name = task_cfg.get("task_id", "task")
 
     datasets_cfg = task_cfg.get("datasets", [])
@@ -275,6 +278,7 @@ def run_benchmark_for_model(
                 flush_every=flush_every,
                 telemetry_collector=telemetry_collector,
                 fewshot_seed=fewshot_seed,
+                max_consecutive_failures=max_consecutive_failures,
             )
 
             results = runner.run(eval_samples)

@@ -5,6 +5,7 @@ from .data_loader import (
     load_systems_metrics,
     load_reliability_metrics,
     load_qualitative_examples,
+    load_label_bias,
 )
 from .charts import (
     plot_headline_bar_chart,
@@ -20,6 +21,7 @@ from .tables import (
     pivot_group_by_table,
     pivot_judge_table,
     pivot_reliability_table,
+    pivot_label_bias_table,
     qualitative_examples_table,
     save_table,
     save_qualitative_examples,
@@ -32,6 +34,7 @@ __all__ = [
     "load_systems_metrics",
     "load_reliability_metrics",
     "load_qualitative_examples",
+    "load_label_bias",
     "plot_headline_bar_chart",
     "plot_grouped_metric_bar_chart",
     "plot_group_by_heatmap",
@@ -43,6 +46,7 @@ __all__ = [
     "pivot_group_by_table",
     "pivot_judge_table",
     "pivot_reliability_table",
+    "pivot_label_bias_table",
     "qualitative_examples_table",
     "save_table",
     "save_qualitative_examples",

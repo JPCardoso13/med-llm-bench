@@ -1,5 +1,4 @@
-from typing import Any, Dict, List, Optional
-from jinja2 import BaseLoader, Environment
+from typing import List, Optional
 from llm_bench.formatters.base_formatter import BaseFormatter
 from llm_bench.schemas import MCQSample
 
@@ -14,16 +13,8 @@ class MCQFormatter(BaseFormatter):
         fewshot_delimiter: str = "\n\n",
         fewshot_header: Optional[str] = None,
     ):
-        self._system_prompt = system_prompt
-        self._user_turn_template = user_turn_template
-        self._fewshot_template = fewshot_template
-        self._fewshot_delimiter = fewshot_delimiter
+        super().__init__(system_prompt, user_turn_template, fewshot_template, fewshot_delimiter)
         self._fewshot_header = fewshot_header
-        self._env = Environment(loader=BaseLoader())
-
-    @property
-    def system_prompt(self) -> str:
-        return self._system_prompt
 
     def format(
         self,
@@ -44,7 +35,3 @@ class MCQFormatter(BaseFormatter):
 
         parts.append(self._render(self._user_turn_template, sample))
         return self._fewshot_delimiter.join(parts)
-
-    def _render(self, template_str: str, sample: MCQSample) -> str:
-        template = self._env.from_string(template_str)
-        return template.render(**sample.model_dump())

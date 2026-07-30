@@ -1,3 +1,3 @@
-from .io import load_results_jsonl, save_results_jsonl
+from .io import save_results_jsonl
 
-__all__ = ["load_results_jsonl", "save_results_jsonl"]
+__all__ = ["save_results_jsonl"]

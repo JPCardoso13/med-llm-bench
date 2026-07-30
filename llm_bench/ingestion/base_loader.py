@@ -11,7 +11,6 @@ class BaseLoader(ABC):
             valid_schemas = ", ".join(SCHEMA_REGISTRY.keys())
             raise ValueError(f"Unknown schema: '{schema_type}'. Valid options are: {valid_schemas}")
             
-        self.schema_type = schema_type
         self.schema_class = SCHEMA_REGISTRY[schema_type]
 
     @abstractmethod

@@ -51,6 +51,19 @@ usage:
     - max
     - sum
 
+# Perplexity of the model's own generated tokens (exp of mean negative
+# log-probability) - a confidence/calibration signal, not a correctness
+# one. Requires the backend to request logprobs (openai_backend.py does by
+# default); absent for any raw result predating that change.
+generation:
+  enabled: true
+  fields:
+    - backend_metrics.perplexity
+  aggregates:
+    - mean
+    - min
+    - max
+
 telemetry:
   enabled: true
   fields:

@@ -30,7 +30,7 @@ def _extract_core_metrics(mcq: dict[str, Any] | None, generative_metrics: dict[s
     out: dict[str, float] = {}
 
     if mcq:
-        for key in ("accuracy", "precision", "recall"):
+        for key in ("accuracy", "precision", "recall", "f1"):
             value = _extract_scalar(mcq.get(key, {}), key)
             if value is not None:
                 out[key] = value
@@ -44,6 +44,9 @@ def _extract_core_metrics(mcq: dict[str, Any] | None, generative_metrics: dict[s
             value = _extract_scalar(rouge_node, rouge_key)
             if value is not None:
                 out[rouge_key] = value
+        compression_ratio = _extract_scalar(generative_metrics.get("compression_ratio", {}), "compression_ratio")
+        if compression_ratio is not None:
+            out["compression_ratio"] = compression_ratio
 
     return out
 
@@ -213,11 +216,11 @@ def load_judge_distributions(reports_dir: str | Path = "outputs/reports") -> pd.
 def load_systems_metrics(reports_dir: str | Path = "outputs/reports") -> pd.DataFrame:
     """One row per (task, model, dataset, metric_name) from systems_summary.json.
 
-    Pulls latency (mean and p99 - the tail, not just the average, since a
-    model that's fast on average but has a long tail is a different risk
-    profile than a consistently fast one) and throughput means. The full
-    systems_summary.json also has p50/p90/p95 and telemetry that aren't
-    needed for the tradeoffs/ charts yet.
+    Pulls latency (mean, p99 - the tail, not just the average, since a model
+    that's fast on average but has a long tail is a different risk profile
+    than a consistently fast one - and cov, mean/std's ratio) and throughput
+    means. The full systems_summary.json also has p50/p90/p95 and telemetry
+    that aren't needed for the tradeoffs/ charts yet.
     """
     rows: list[dict[str, Any]] = []
     reports_dir = Path(reports_dir)
@@ -245,6 +248,16 @@ def load_systems_metrics(reports_dir: str | Path = "outputs/reports") -> pd.Data
                 if total_latency.get("p99") is not None:
                     rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
                                   "metric_name": "total_latency_ms_p99", "value": total_latency["p99"]})
+                # Coefficient of variation (std/mean) - a scale-free measure of how
+                # spread out latency is, so a slow-but-consistent model and a
+                # fast-but-erratic one don't look the same just because their means
+                # happen to be close. Derived here from mean+std already computed
+                # by the calculator, not a new calculator metric.
+                mean = total_latency.get("mean")
+                std = total_latency.get("std")
+                if mean is not None and std is not None and mean > 0:
+                    rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
+                                  "metric_name": "total_latency_ms_cov", "value": std / mean})
 
                 for throughput_name, throughput_node in metrics.get("throughput", {}).items():
                     mean = throughput_node.get("mean")
@@ -255,12 +268,25 @@ def load_systems_metrics(reports_dir: str | Path = "outputs/reports") -> pd.Data
     return pd.DataFrame(rows, columns=["task_id", "model_name", "dataset", "metric_name", "value"])
 
 
-def load_reliability_metrics(reports_dir: str | Path = "outputs/reports") -> pd.DataFrame:
+def load_reliability_metrics(
+    reports_dir: str | Path = "outputs/reports",
+    judge_flag_rates: list[tuple[str, str]] | None = None,
+) -> pd.DataFrame:
     """One row per (task, model, dataset, metric_name) - failure/quality rates, not scores.
 
     Reads the "quality" block already computed alongside each dataset group
     (parse_failure_count, ambiguous_extraction_count, missing_ref_field_count,
-    truncated_count), normalized to a rate using that group's sample_count.
+    truncated_count, shrunk_budget_truncated_count), normalized to a rate
+    using that group's sample_count.
+
+    judge_flag_rates: optional (rubric_item, label) pairs whose label
+    percentage should also be surfaced here as a "bad outcome rate" - e.g.
+    [("safety_flag", "Unsafe")]. Deliberately not hardcoded in this function:
+    the judge rubric is fully generic (arbitrary item names, arbitrary label
+    sets, no consistent "worst label" position), so which pairs count as a
+    reliability concern is a project-specific curation choice - see
+    JUDGE_FLAG_RATES in scripts/analysis/generate_report.py, same pattern as
+    GROUP_BY_FIELDS/TRADEOFF_QUALITY_METRIC.
     """
     rows: list[dict[str, Any]] = []
     reports_dir = Path(reports_dir)
@@ -283,13 +309,26 @@ def load_reliability_metrics(reports_dir: str | Path = "outputs/reports") -> pd.
                 quality = group.get("quality", {})
                 if sample_count <= 0:
                     continue
-                for count_key in ("parse_failure_count", "ambiguous_extraction_count", "missing_ref_field_count", "truncated_count"):
+                for count_key in ("parse_failure_count", "ambiguous_extraction_count", "missing_ref_field_count", "truncated_count", "shrunk_budget_truncated_count"):
                     count = quality.get(count_key)
                     if count is None:
                         continue
                     rate_name = count_key.replace("_count", "_rate")
                     rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
                                   "metric_name": rate_name, "value": count / sample_count})
+
+                llm_judge = group["metrics"].get("llm_judge")
+                if llm_judge and judge_flag_rates:
+                    items = llm_judge.get("items", {})
+                    for rubric_item, label in judge_flag_rates:
+                        item_summary = items.get(rubric_item)
+                        if not item_summary:
+                            continue
+                        percentage = item_summary.get("percentages", {}).get(label)
+                        if percentage is None:
+                            continue
+                        rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
+                                      "metric_name": f"{rubric_item}_{label.lower()}_rate", "value": percentage})
 
     return pd.DataFrame(rows, columns=["task_id", "model_name", "dataset", "metric_name", "value"])
 
@@ -338,3 +377,38 @@ def load_qualitative_examples(reports_dir: str | Path = "outputs/reports", top_n
         rows,
         columns=["task_id", "model_name", "dataset", "rank", "sample_id", "composite_score", "response_preview", "reference_answer"],
     )
+
+
+def load_label_bias(reports_dir: str | Path = "outputs/reports") -> pd.DataFrame:
+    """One row per (task, model, dataset, letter, kind, value) from MCQ's
+    label_distribution block - kind is "predicted" or "reference", value is
+    that letter's share (0-1) of that kind's total.
+    """
+    rows: list[dict[str, Any]] = []
+    reports_dir = Path(reports_dir)
+
+    for task_dir in sorted(reports_dir.glob("*")):
+        if not task_dir.is_dir():
+            continue
+        task_id = task_dir.name
+
+        for model_dir in sorted(task_dir.glob("*")):
+            summary_path = model_dir / "cognitive_summary.json"
+            if not summary_path.exists():
+                continue
+            model_name = model_dir.name
+
+            data = json.loads(summary_path.read_text())
+            for group in data.get("groups", []):
+                dataset = group["dataset"]
+                distribution = group["metrics"].get("mcq", {}).get("label_distribution")
+                if not distribution:
+                    continue
+                for kind in ("predicted", "reference"):
+                    for letter, pct in distribution.get(f"{kind}_pct", {}).items():
+                        if pct is None:
+                            continue
+                        rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
+                                      "letter": letter, "kind": kind, "value": pct})
+
+    return pd.DataFrame(rows, columns=["task_id", "model_name", "dataset", "letter", "kind", "value"])

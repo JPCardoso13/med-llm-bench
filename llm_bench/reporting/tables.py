@@ -17,6 +17,18 @@ def pivot_headline_table(headline_df: pd.DataFrame, task_id: str, dataset: str) 
     return wide
 
 
+def pivot_label_bias_table(label_bias_df: pd.DataFrame, task_id: str, dataset: str) -> pd.DataFrame:
+    """Wide table for one task+dataset: rows=(model, predicted/reference), columns=letter, values=share."""
+    subset = label_bias_df[(label_bias_df["task_id"] == task_id) & (label_bias_df["dataset"] == dataset)]
+    if subset.empty:
+        return pd.DataFrame()
+
+    wide = subset.pivot_table(index=["model_name", "kind"], columns="letter", values="value")
+    wide = wide.sort_index()
+    wide.index.names = ["model", "kind"]
+    return wide
+
+
 def pivot_group_by_table(group_df: pd.DataFrame, task_id: str, dataset: str, group_field: str, metric_name: str) -> pd.DataFrame:
     """Wide table for one task+dataset+grouping field+metric: rows=model, columns=group value."""
     subset = group_df[

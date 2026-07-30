@@ -12,6 +12,12 @@ enable_grouping: true
 # calculator always includes this block today.
 include_parsing_summary: true
 
+# output_tokens/input_tokens - how much the model condensed its input.
+# input_tokens is the full formatted prompt (document + instructions), not
+# the document alone, but for this task (no fewshot, minimal system-prompt
+# overhead) it's a reasonable proxy.
+compression: true
+
 # Whole response IS the summary verbatim (src.yaml forbids headers). Unlike
 # a short QA answer, multi-line is legitimate content here, so on_multiline
 # joins instead of truncating.

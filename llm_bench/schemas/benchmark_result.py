@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field
 class BenchmarkResult(BaseModel):
     sample_id: str
     dataset: str
-    task_name: str
-    sample_type: str
 
     prompt: str
     response: str

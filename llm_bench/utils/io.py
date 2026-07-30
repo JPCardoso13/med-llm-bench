@@ -31,12 +31,3 @@ def save_results(results: List[BenchmarkResult], path: str | Path) -> None:
     raise ValueError(f"Unsupported results extension: {suffix}. Use .json or .jsonl")
 
 
-def load_results_jsonl(path: str | Path) -> List[BenchmarkResult]:
-    path = Path(path)
-    results = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                results.append(BenchmarkResult.model_validate_json(line))
-    return results

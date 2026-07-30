@@ -14,7 +14,6 @@ class GenerativeSample(BaseModel):
         answer (str): The reference answer (ground truth) used for evaluation.
         ref_reasoning (Optional[str]): Optional reference reasoning/explanation for the answer.
         context (Optional[str]): Reference text if the task is context-dependent (e.g., a reading comprehension task).
-        source (Optional[str]): The origin dataset name.
         grouping (Dict[str, List[str]]): Group-by axes for aggregated metrics.
                                          Example: {"specialty": ["cardiology", "oncology"], "topic": ["quantum physics"]}
         metadata (Dict[str, str]): Auxiliary metadata not intended for aggregation.
@@ -26,7 +25,6 @@ class GenerativeSample(BaseModel):
     answer: str
     ref_reasoning: Optional[str] = None
     context: Optional[str] = None
-    source: Optional[str] = None
     grouping: Dict[str, List[str]] = Field(default_factory=dict)
     metadata: Dict[str, str] = Field(default_factory=dict)
 

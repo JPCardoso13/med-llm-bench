@@ -15,7 +15,6 @@ class MCQSample(BaseModel):
                                   Example: {"A": "Option 1", "B": "Option 2"}
         answer_idx (str): The key corresponding to the correct option.
         context (Optional[str]): Reference text if the task is context-dependent (e.g., a reading comprehension task).
-        source (Optional[str]): The origin dataset name.
         grouping (Dict[str, List[str]]): Group-by axes for aggregated metrics.
                                          Example: {"specialty": ["cardiology", "oncology"], "topic": ["quantum physics"]}
         metadata (Dict[str, str]): Auxiliary metadata not intended for aggregation.
@@ -27,7 +26,6 @@ class MCQSample(BaseModel):
     options: Dict[str, str]
     answer_idx: str
     context: Optional[str] = None
-    source: Optional[str] = None
     grouping: Dict[str, List[str]] = Field(default_factory=dict)
     metadata: Dict[str, str] = Field(default_factory=dict)
 

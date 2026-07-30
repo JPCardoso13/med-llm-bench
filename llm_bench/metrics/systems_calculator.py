@@ -117,6 +117,17 @@ def _summarize_group(
             dataset=dataset,
         )
 
+    generation_cfg = profile.get("generation", {})
+    if generation_cfg.get("enabled", False):
+        metrics["generation"] = _summarize_direct_fields(
+            results=results,
+            fields=generation_cfg.get("fields", []),
+            aggregates=generation_cfg.get("aggregates", []),
+            percentiles=generation_cfg.get("percentiles", []),
+            missing_fields=missing_fields,
+            dataset=dataset,
+        )
+
     telemetry_cfg = profile.get("telemetry", {})
     if telemetry_cfg.get("enabled", False):
         metrics["telemetry"] = _summarize_direct_fields(
