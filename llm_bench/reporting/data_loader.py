@@ -118,12 +118,11 @@ def load_group_by_metrics(reports_dir: str | Path = "outputs/reports", fields: l
     dataset group - same metric-extraction convention as load_headline_metrics,
     reused rather than duplicated.
 
-    fields: if given, only these group_field names are kept (matched by name,
-    across whichever datasets happen to expose them) - not every grouping
-    field a dataset exposes is equally useful for a headline comparison, and
-    this function stays generic rather than hardcoding which ones matter for
-    any particular project. The actual list is the caller's choice (see
-    GROUP_BY_FIELDS in scripts/analysis/generate_report.py), not baked in here.
+    fields: optional filter, kept for flexibility - unused by default. Which
+    fields are worth grouping by is decided once at the source (each dataset
+    config's mapping.grouping vs mapping.metadata), not curated here or in
+    the caller, so callers normally pass nothing and this returns whatever
+    the calculator actually found.
     """
     rows: list[dict[str, Any]] = []
     reports_dir = Path(reports_dir)
@@ -286,7 +285,7 @@ def load_reliability_metrics(
     sets, no consistent "worst label" position), so which pairs count as a
     reliability concern is a project-specific curation choice - see
     JUDGE_FLAG_RATES in scripts/analysis/generate_report.py, same pattern as
-    GROUP_BY_FIELDS/TRADEOFF_QUALITY_METRIC.
+    TRADEOFF_QUALITY_METRIC.
     """
     rows: list[dict[str, Any]] = []
     reports_dir = Path(reports_dir)

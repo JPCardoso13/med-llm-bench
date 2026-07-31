@@ -15,6 +15,7 @@ mapping:
   options: "options"
   answer_idx: "label"
   grouping:
-    medical_task: "medical_task"
     body_system: "body_system"
+  metadata:
+    medical_task: "medical_task"
     question_type: "question_type"

@@ -1,0 +1,17 @@
+name: gemma_3_1b_it
+engine: vllm
+model_id: google/gemma-3-1b-it
+backend_api: openai_compatible
+# Third local test model, distinct vendor family from both existing ones
+# (qwen2_5_3b_instruct: Alibaba, granite_3_1_2b_instruct: IBM) - Google,
+# matching the same unrelated-family principle already used for judge
+# selection. Deliberately not gemma3_4b_it_judge (also Google) to avoid
+# using the same model as both a benchmarked model and the local judge.
+# Already confirmed booting cleanly with max_model_len=16384 in an earlier
+# session's candidate check (ungated, ~1B params - comfortably within this
+# devcontainer's single 16GB GPU).
+tensor_parallel_size: 1
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+startup_timeout_s: 1800

@@ -17,7 +17,6 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
     if not profile.get("enabled", True):
         return {
             "profile_id": profile.get("profile_id", "cognitive"),
-            "schema_version": profile.get("schema_version", 1),
             "scope": profile.get("scope", "cognitive"),
             "enabled": False,
             "sample_count": len(results),
@@ -67,7 +66,6 @@ def calculate_cognitive_metrics(results: list[BenchmarkResult], profile: Mapping
 
     return {
         "profile_id": profile.get("profile_id", "cognitive"),
-        "schema_version": profile.get("schema_version", 1),
         "scope": profile.get("scope", "cognitive"),
         "task_type": profile.get("task_type", "mcq"),
         "enabled": True,
@@ -193,6 +191,7 @@ def _build_group_by_breakdown(
                     ambiguous_extractions=[],
                     missing_ref_fields=[],
                     dataset=dataset,
+                    include_diagnostics=False,
                 )
             elif task_type == "generative":
                 values_summary[value] = _summarize_generative_group(
@@ -201,6 +200,7 @@ def _build_group_by_breakdown(
                     parse_failures=[],
                     missing_ref_fields=[],
                     dataset=dataset,
+                    include_diagnostics=False,
                 )
 
         breakdown[field] = values_summary
@@ -238,6 +238,7 @@ def _summarize_generative_group(
     parse_failures: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
     dataset: str,
+    include_diagnostics: bool = True,
 ) -> dict[str, Any]:
     similarity_cfg = profile.get("similarity", {})
     similarity_enabled = bool(similarity_cfg.get("enabled", True))
@@ -425,12 +426,18 @@ def _summarize_generative_group(
         "dataset": dataset,
         "sample_count": len(results),
         "metrics": metrics_summary,
-        "per_sample_scores": all_sample_scores,
     }
 
-    diagnostics = _build_generative_diagnostics(per_sample_rows, reporting_cfg)
-    if diagnostics:
-        summary["diagnostics"] = diagnostics
+    # Per-sample detail (scores for judge-agreement joining, diagnostics for
+    # worst/best-example previews) only makes sense at the top-level group -
+    # a group_by bucket call passes include_diagnostics=False so a dataset
+    # with N grouping fields doesn't multiply this detail by N copies for
+    # subgroup slices nothing downstream reads.
+    if include_diagnostics:
+        summary["per_sample_scores"] = all_sample_scores
+        diagnostics = _build_generative_diagnostics(per_sample_rows, reporting_cfg)
+        if diagnostics:
+            summary["diagnostics"] = diagnostics
 
     return summary
 
@@ -603,6 +610,7 @@ def _summarize_mcq_group(
     ambiguous_extractions: list[dict[str, Any]],
     missing_ref_fields: list[dict[str, Any]],
     dataset: str,
+    include_diagnostics: bool = True,
 ) -> dict[str, Any]:
     mcq_cfg = profile.get("mcq", {})
     if not mcq_cfg.get("enabled", True):
@@ -751,9 +759,12 @@ def _summarize_mcq_group(
             "parse_success_rate": (parsed_success_count / evaluated_count) if evaluated_count > 0 else None,
         }
 
-    diagnostics = _build_mcq_diagnostics(per_sample_rows, reporting_cfg)
-    if diagnostics:
-        summary["diagnostics"] = diagnostics
+    # Only at the top-level group - see the matching comment in
+    # _summarize_generative_group for why a group_by bucket skips this.
+    if include_diagnostics:
+        diagnostics = _build_mcq_diagnostics(per_sample_rows, reporting_cfg)
+        if diagnostics:
+            summary["diagnostics"] = diagnostics
 
     return summary
 

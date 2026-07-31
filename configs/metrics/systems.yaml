@@ -64,6 +64,17 @@ generation:
     - min
     - max
 
+# Two field sets below because the two telemetry collectors produce
+# different key names for the same underlying stats: remote_http (SLURM/
+# multi-node, via nvidia_smi_agent.py) reports cluster-wide aggregates
+# under *_cluster names plus sample_count_total/node_count_reporting;
+# nvidia_smi (local/single-machine, in-process) reports the same stats
+# without the _cluster suffix and has no per-node concept at all. Whichever
+# collector wasn't used for a given run just shows up as a missing field
+# (harmless - same as any other backend-capability gap) rather than picking
+# one shape and leaving the other silently broken. True per-node breakdown
+# for multi-node runs (remote_http's node_results) isn't representable here
+# yet - that needs a group_by-style mechanism, not a fixed field list.
 telemetry:
   enabled: true
   fields:
@@ -73,6 +84,11 @@ telemetry:
     - backend_metrics.system.gpu_utilization_pct_max_cluster
     - backend_metrics.system.gpu_memory_used_mb_avg_cluster
     - backend_metrics.system.gpu_memory_used_mb_max_cluster
+    - backend_metrics.system.sample_count
+    - backend_metrics.system.gpu_utilization_pct_avg
+    - backend_metrics.system.gpu_utilization_pct_max
+    - backend_metrics.system.gpu_memory_used_mb_avg
+    - backend_metrics.system.gpu_memory_used_mb_max
   aggregates:
     - mean
     - min

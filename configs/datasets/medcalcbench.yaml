@@ -14,11 +14,11 @@ mapping:
   answer: "Ground Truth Answer"
   ref_reasoning: "Ground Truth Explanation"
   grouping:
-    calculator_name: "Calculator Name"
     category: "Category"
+  metadata:
+    calculator_name: "Calculator Name"
     output_type: "Output Type"
     note_type: "Note Type"
-  metadata:
     note_id: "Note ID"
     relevant_entities: "Relevant Entities"
     lower_limit: "Lower Limit"

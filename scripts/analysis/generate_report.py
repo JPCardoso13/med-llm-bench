@@ -55,14 +55,10 @@ TRADEOFF_X_METRICS = ["decoding_throughput", "total_latency_ms_p99"]
 # (token_f1/rouge*) are left as separate charts for now, not asked for yet.
 MCQ_METRIC_NAMES = {"accuracy", "precision", "recall", "f1"}
 
-# Which group_by fields (matched by name, across whichever datasets happen
-# to expose them) get charted under subgroups/. Not every grouping field a
-# dataset exposes is equally useful for a headline comparison - as of
-# 2026-07-22, only body_system is genuinely a body-system/medical-specialty
-# field (medxpertqa); everything else in the data today is a different kind
-# of axis (exam step, reasoning structure, calculator category, note
-# format, document length), not specialty. Add names here to bring any back.
-GROUP_BY_FIELDS = ["body_system"]
+# No group-by field curation here - which fields are worth breaking results
+# down by is a data-source decision, made once in each dataset config's
+# mapping.grouping (vs. mapping.metadata for fields that shouldn't be
+# aggregated on). This just charts whatever the calculator actually found.
 
 # (rubric_item, label) pairs surfaced as reliability rates alongside
 # parse/truncation failures - a judge label is a bad-outcome rate worth
@@ -211,8 +207,7 @@ def main() -> None:
         print(f"No cognitive_summary.json files found under {reports_dir} - nothing to report.")
         return
 
-    print(f"Group-by fields restricted to: {GROUP_BY_FIELDS}")
-    group_df = load_group_by_metrics(reports_dir, fields=GROUP_BY_FIELDS)
+    group_df = load_group_by_metrics(reports_dir)
     judge_df = load_judge_distributions(reports_dir)
     systems_df = load_systems_metrics(reports_dir)
     reliability_df = load_reliability_metrics(reports_dir, judge_flag_rates=JUDGE_FLAG_RATES)
