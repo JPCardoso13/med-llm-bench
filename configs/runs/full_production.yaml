@@ -1,7 +1,4 @@
 # The real benchmarking run: all 3 tasks, all 8 production models.
-# Used by the HPC SLURM wrappers (scripts/orchestration/*.sh) by default -
-# expresses "run everything" as an explicit selection rather than relying on
-# whatever happens to be sitting in configs/tasks/ and configs/models/.
 tasks:
   - cdkr
   - oecr

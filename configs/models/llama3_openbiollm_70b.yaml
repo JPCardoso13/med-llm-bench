@@ -1,4 +1,3 @@
-name: llama3_openbiollm_70b
 engine: vllm
 model_id: aaditya/Llama3-OpenBioLLM-70B
 backend_api: openai_compatible

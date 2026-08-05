@@ -124,12 +124,6 @@ def main() -> None:
 
     _sync_hf_env()
 
-    # Prepend our patches/ dir so sitecustomize.py runs at vLLM startup and
-    # patches prometheus_fastapi_instrumentator before vLLM imports it.
-    patches_dir = str(Path(__file__).parent / "patches")
-    current_pythonpath = os.environ.get("PYTHONPATH", "")
-    os.environ["PYTHONPATH"] = f"{patches_dir}:{current_pythonpath}" if current_pythonpath else patches_dir
-
     # Replace this process with the real vLLM server.
     # sys.argv[1:] contains the vLLM flags (--model, --port, …).
     os.execvp(sys.executable,

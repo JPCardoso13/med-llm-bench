@@ -1,13 +1,7 @@
-name: gemma3_4b_it_judge
 engine: vllm
 model_id: google/gemma-3-4b-it
 backend_api: openai_compatible
-# Local smoke-test judge - distinct family from both test models
-# (qwen2_5_3b_instruct: Alibaba, llama3_2_3b_instruct: Meta), matching the
-# same unrelated-family principle used for the real production judge pick.
-# Gemma 3 (not Gemma 2, which caps at 8192) supports 128k native context -
-# the judge sees the same long prompts as the model it's judging, so it
-# needs comparable context headroom, not just the benchmarked models.
+# Local smoke-test judge, distinct family from the local test models.
 tensor_parallel_size: 1
 max_model_len: 16384
 gpu_memory_utilization: 0.90

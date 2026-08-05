@@ -4,17 +4,12 @@ task_type: mcq
 
 enabled: true
 
-# Per-value breakdowns for whatever grouping fields the dataset defines -
-# auto-discovered, not named here.
+# Auto-discovers whatever grouping fields the dataset defines.
 enable_grouping: true
 
-# Whether parsing-diagnostic counts (success/failure/ambiguous rates) appear
-# in output. Parsing itself always runs; this only toggles the report.
+# Parsing always runs; this only toggles whether success/failure counts are reported.
 include_parsing_summary: true
 
-# Ordered regex patterns tried against the response; each must capture the
-# answer letter in group 1. Multiple distinct letters found -> "ambiguous";
-# none found -> "missing".
 extraction:
   answer_patterns:
     - 'final\s+answer\s*[:\-]?\s*\(?\s*([A-J])\s*\)?'
@@ -34,14 +29,10 @@ reporting:
 mcq:
   enabled: true
   accuracy: true
-  # Averaging is hard-coded to macro; not configurable today.
-  precision: true
+  precision: true  # averaging is hard-coded to macro
   recall: true
   f1: true
-  # Predicted-letter vs. correct-letter distribution - surfaces a model
-  # leaning on one option regardless of the question, which accuracy alone
-  # can hide.
-  label_bias: true
+  label_bias: true  # predicted vs. correct letter distribution
 
 llm_judge:
   enabled: false

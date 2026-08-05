@@ -80,7 +80,7 @@ def main() -> int:
 
     disable_progress_bar()
 
-    workdir = Path(__file__).resolve().parents[1]
+    workdir = Path(__file__).resolve().parents[2]
     hf_home = Path(os.environ.get("HF_HOME", workdir / ".cache" / "huggingface"))
     hub_cache = hf_home / "hub"
     datasets_cache = hf_home / "datasets"

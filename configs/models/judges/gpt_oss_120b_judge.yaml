@@ -1,12 +1,7 @@
-name: gpt_oss_120b_judge
 engine: vllm
 model_id: openai/gpt-oss-120b
 backend_api: openai_compatible
-# Fallback judge if deepseek_v4_flash_judge.yaml doesn't fit VRAM in
-# practice. ~117B total / ~5.1B active (MoE), designed by OpenAI to fit a
-# single 80GB GPU with native MXFP4 quantization - TP=1 is the right-sized
-# choice, not a compromise, matching how smaller production models in this
-# roster already use TP=1 rather than defaulting to all 4 available GPUs.
+# Fallback judge if deepseek_v4_flash_judge.yaml doesn't fit VRAM in practice.
 tensor_parallel_size: 1
 max_model_len: 16384
 gpu_memory_utilization: 0.90

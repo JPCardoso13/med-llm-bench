@@ -1,5 +1,3 @@
-schema_version: 1
-
 task_id: src
 task_type: generative
 
@@ -21,9 +19,7 @@ execution:
   num_fewshot: 0
   flush_every: 10
   max_tokens: 512
-  # No fewshot examples used today (num_fewshot: 0), so this is currently
-  # inert - kept for consistency and in case num_fewshot changes later.
-  fewshot_seed: 42
+  fewshot_seed: 42  # inert while num_fewshot: 0
 
 runtime:
   telemetry_config: configs/runtime/telemetry.auto.yaml

@@ -1,273 +1,214 @@
-# Handoff: pre-flight fixes for the first real Deucalion test run
+# Handoff: moving to the rtx4060/haslab SLURM cluster
 
-Disposable note for continuing this work in a different Claude Code session
-(devcontainer or otherwise) - this was written from a session running
-directly on the Deucalion cluster, where the prior conversation isn't
-available to you. Delete this file once you've read it and don't need it
-anymore - it's a snapshot, not documentation.
+Written at the end of a long devcontainer session, for whichever Claude Code
+instance picks this up on the cluster. Everything below is committed and
+pushed - `git log`/`git status` are authoritative for what's actually in the
+repo; this file is for the context that isn't obvious from reading code
+alone (why decisions were made, what's still open, what to watch for).
 
-## 0. Before anything else: is this actually committed?
+## What this tool is
 
-**As of writing, it is not.** `git log` on Deucalion shows `HEAD` at
-`67577fd` ("SLURM orchestration script bug fixes + Added definitive
-LLM-as-a-Judge choice + Fixed local smoke test pipeline bugs + Final run
-readiness check") with everything below sitting **uncommitted on top of
-it, on the Deucalion filesystem only**. Unlike the last handoff, this one
-did *not* originate from a devcontainer-commit-push-pull flow - it was
-written live on the cluster, so there is nothing to `git pull` yet. If
-you're reading this anywhere other than that same Deucalion checkout, the
-changes below don't exist in your filesystem at all; this file is the only
-record of them until someone commits and pushes from Deucalion. Don't
-assume git history reflects any of this.
+`llm_bench` is a config-driven, model- and domain-agnostic LLM benchmarking
+framework, built as a Python library for a Biomedical Engineering (Medical
+Informatics) master's thesis. It evaluates LLMs from both a **systems**
+angle (TTFT, throughput, token usage, GPU telemetry, generation perplexity)
+and a **cognitive** angle (accuracy/precision/recall/F1 for MCQ, token-F1/
+ROUGE/exact-match for free text, plus an LLM-as-judge pass with categorical
+rubrics - never numeric scores).
 
-`git status --short` on Deucalion as of writing:
-```
- M scripts/asset_caching/download_hf_assets.py
- M scripts/asset_caching/download_hf_assets.sh
- M scripts/orchestration/deucalion_orchestrator.sh
- D scripts/vllm/python_vllm.sh
-?? scripts/vllm/python_vllm_deucalion.sh
-?? scripts/vllm/python_vllm_pipeline.sh
-?? scripts/vllm/python_vllm_slurm.sh
-```
+The core design principle - the thing basically all of the last session's
+work was in service of - is that **the framework itself carries zero
+hardcoded task-specific values**. A user defines datasets, prompts, and
+which metrics to compute entirely in YAML; the Python code stays generic
+across models, tasks, and datasets. The one real boundary: **new metrics
+require code** (they need to be added to a calculator), but new
+datasets/models/prompts should never require touching Python. If you find
+yourself editing `llm_bench/` to support a new dataset or model, something's
+wrong - that should be a config change only.
 
-Suggested commit message, in this repo's established style (short clauses
-joined by " + "), if/when someone commits this:
-```
-Fixed HF_HOME cache-path bug across SLURM/asset scripts + Repurposed
-asset-caching script for judge downloads and access checks + Split
-python_vllm.sh into per-cluster wrappers + shared pipeline body + Bumped
-deucalion time budget for judge boot time
-```
+Three benchmark tasks, each pinning the framework to the thesis's
+biomedical scope:
+- **CDKR** (Closed Domain Knowledge Retrieval) - MCQ, medical exam
+  questions (MedQA, MedXpertQA)
+- **OECR** (Open-Ended Clinical Reasoning) - free-text generative, clinical
+  case reasoning (MedCalc-Bench, MedCaseReasoning)
+- **SRC** (Summarization and Reading Comprehension) - free-text generative,
+  biomedical document summarization (PubMedSum, MultiClinSum)
 
-## 1. What prompted this session
+A vision task was floated as a stretch goal but is explicitly not
+committed scope - don't build it unless the user asks.
 
-Picking up right where the last handoff left off: about to run the
-first-ever real test of the full production pipeline on actual SLURM
-hardware (`bash scripts/orchestration/deucalion_orchestrator.sh` - 8
-models, 3 tasks, 6 datasets, `eval_limit: 10`, plus the judge pass). Before
-firing that off, this session did a pre-flight review the previous session
-hadn't done: read through the orchestration scripts for staleness, and
-specifically checked the Hugging Face cache path against what's actually
-on disk (the user pointed out the real cache lives one directory *above*
-the project dir, not inside it).
+This serves two purposes for the thesis: (1) a real end-to-end validation
+of the framework itself, and (2) actual conclusions about LLM behavior in
+the biomedical domain, which the thesis needs regardless of the tool.
 
-## 2. Bugs found and fixed this session
+## Where things stand
 
-**Real, objectively-wrong bug (fixed directly, matching standing
-preference to fix genuine bugs without asking):**
+The last long session did a full pass on config/code correctness across the
+whole repo - `configs/metrics/`, `configs/datasets/`, `configs/tasks/`,
+`configs/prompts/`, `configs/models/`, `configs/runs/`, and most of
+`scripts/` (orchestration, vllm launch shim, asset caching, sanity checks).
+Real bugs were found and fixed along the way, not just theoretical cleanup -
+a couple of the more consequential ones: a calculator silently ignoring an
+entire config block because the code still looked for a renamed key: fixed;
+`download_hf_assets.py` resolving its own project root one directory level
+too shallow, meaning it would silently discover zero models/datasets and
+report "download complete" having downloaded nothing: fixed; a dead
+monkey-patch (`scripts/patches/`) that had never actually loaded due to a
+separate path bug: removed entirely rather than fixed, since it wasn't
+needed anymore anyway.
 
-- `run_pipeline.sh` (shared job body, untouched) defaults `HF_HOME` to
-  `$WORKDIR/.cache/huggingface` - a directory that does not exist. The
-  actual populated cache is at `$(dirname $WORKDIR)/.cache/huggingface`
-  (i.e. `/projects/F202500001HPCVLABEPICURE/jcardoso/.cache/huggingface`,
-  a sibling of the project dir, confirmed on disk - 52GB for
-  `gemma-3-27b-it` alone, real weights not empty dirs). Under
-  `HF_OFFLINE=1` (Deucalion's default), a wrong `HF_HOME` means every
-  model load fails outright with no download fallback - this would have
-  killed the very first real run before it started.
-- Fixed by exporting the correct `HF_HOME` explicitly in
-  **`deucalion_orchestrator.sh`** (cluster-specific override, same pattern
-  already used there for `WORKDIR`/`HF_OFFLINE`/etc - `run_pipeline.sh`
-  itself was left alone since its generic fallback is only wrong on this
-  one cluster).
-- The identical wrong-default bug also existed in
-  `scripts/asset_caching/download_hf_assets.sh` - fixed the same way.
+A 3-model local smoke test (Qwen2.5-3B, Granite-3.1-2B, Gemma-3-1B, one
+model per vendor family) just ran clean end-to-end in the devcontainer -
+all 3 tasks, 50 samples/dataset, including a real judge pass and real GPU
+telemetry (via the `nvidia_smi` collector, which runs in-process with zero
+external setup - see the telemetry note below for how this differs on a
+SLURM cluster). This proved the whole pipeline works, but at devcontainer
+scale on small models - it hasn't been proven on a real multi-model SLURM
+run since the config/code fixes above landed.
 
-**Verified clean, no changes needed:** `orchestrator.py`,
-`llm_judge_run.py`, `vllm_manager.py`, `run_pipeline.sh` - no obsolete or
-dead code paths on the critical run path. Confirmed `med-llm-bench.sif`
-exists, `singularity` is on `PATH`, SLURM account is valid, all 8
-production models in `configs/runs/full_production.yaml` are cached and
-populated, and all 6 enabled datasets are available (5 via the HF cache,
-`multiclinsum` from local `data/processed/multiclinsum/*.jsonl`, no HF
-dependency at all).
+Reporting/analysis (`scripts/analysis/generate_report.py` +
+`llm_bench/reporting/`) is built and has been iterated on with real
+feedback multiple times - it turns `outputs/reports/*.json` into charts and
+tables under `outputs/analysis/`. **As of the last session, it's now wired
+into `run_pipeline.sh` as a final automatic step** (it wasn't before - the
+user explicitly wants one SLURM job to produce everything: benchmark
+results, judge scores, and human-readable reports, with no manual
+follow-up step). This addition follows the exact pattern of the existing
+judge-pass step but has not yet been proven on a real cluster run.
 
-**Judge model: none of the 3 candidates were cached.** Deucalion has no
-general internet access, so `deepseek_v4_flash_judge.yaml`,
-`gpt_oss_120b_judge.yaml`, and `gemma3_4b_it_judge.yaml` (`DeepSeek-V4-Flash`,
-`gpt-oss-120b`, `gemma-3-4b-it` respectively) were all unreachable as-is.
-**Decision made this session: only download `DeepSeek-V4-Flash`** (the
-original first-choice judge from the last handoff), to save time/bandwidth
-rather than fetching all 3 candidates. This is an operational choice for
-*this run*, not a resolution of the architectural judge-selection question
-still open in the backlog below.
+## Why the move to this cluster specifically
 
-**`download_hf_assets.py`/`.sh` repurposed to actually fetch it.** The
-script predates `configs/models/judges/` (confirmed via `git log`: script
-last touched in `2811060`, `judges/` subdir introduced two commits later in
-`aa65cfd`) and never scanned that directory, which is exactly why the judge
-models were never cached in the first place. Changes:
-- Default model sweep now also walks `configs/models/judges/*.yaml`.
-- Added `--models PATH [PATH ...]` to target specific config files instead
-  of the full sweep.
-- Added `--skip-models` / `--skip-datasets`.
-- Added `--check-only`: a fast, metadata-only `HfApi().model_info()` call
-  per targeted repo (no download) that reports `OK`/`DENIED` per repo -
-  built so gated-repo access can be verified in seconds instead of
-  discovering a license-acceptance problem partway through a multi-hour
-  download. Reusable for any future model, not just this one.
-- `download_hf_assets.sh` now forwards `"$@"` to the Python script
-  (previously took no arguments at all).
+Deucalion (the bigger A100 cluster) has a storage quota problem that isn't
+resolvable soon, so the plan is to run on the smaller rtx4060/haslab
+cluster instead. This is a real hardware downgrade, not a lateral move -
+the current `configs/models/*.yaml` production roster (the 8 models in
+`configs/runs/full_production.yaml`) was sized for Deucalion's 4x80GB A100
+allocation and almost certainly does not fit here. The user believes ~4
+GPUs at 16GB each may be available on this cluster, but this needs
+confirming on the cluster itself before any model decisions are finalized.
 
-**`scripts/vllm/python_vllm.sh` (a separate, standalone manual launcher for
-ad-hoc Python/vLLM scripts under SLURM - not part of the orchestrator path)
-was flagged by the user as inconsistent and split, mirroring the existing
-`run_pipeline.sh`/`deucalion_orchestrator.sh`/`slurm_orchestrator.sh`
-pattern:**
-- It had `#SBATCH --partition=rtx4060 --account=haslab` pragmas (small
-  cluster) but a hardcoded Deucalion `WORKDIR` and `HF_OFFLINE=1` default -
-  internally contradictory, and as written could not actually run
-  correctly on either cluster.
-- Split into `python_vllm_pipeline.sh` (shared job body, `HF_HOME` bug
-  fixed the same way, `HF_OFFLINE` last-resort default flipped to `0` to
-  match `run_pipeline.sh`'s convention), `python_vllm_deucalion.sh`
-  (correct Deucalion partition/account/`WORKDIR`), and
-  `python_vllm_slurm.sh` (correct rtx4060/haslab partition/account/
-  `WORKDIR` - named to match the existing `slurm_orchestrator.sh`
-  convention for that cluster, not "haslab").
-- Old `scripts/vllm/python_vllm.sh` removed (`git rm`, uncommitted).
-- **Usage change**: invocation goes from `sbatch scripts/vllm/python_vllm.sh
-  <script> [args]` to `bash scripts/vllm/python_vllm_deucalion.sh <script>
-  [args]` (or `_slurm.sh` on the small cluster) - matching how every other
-  wrapper in this repo is launched. Resource shape (`--nodes=2`, no
-  explicit `--gpus`, `--time=02:00:00`) was kept identical to the original
-  on both wrappers rather than guessed at per-cluster; revisit if that
-  turns out to be wrong for either cluster's actual needs.
+A rough sanity check on the existing catalog against a 4x16GB (64GB total)
+budget, for calibration - not a final answer, VRAM math should be verified
+properly once real hardware specs are confirmed:
+- The two 70B models (`llama3_1_70b`, `llama3_openbiollm_70b`, currently
+  `tensor_parallel_size: 4`) need ~140GB unquantized even split across 4
+  GPUs - won't fit.
+- The unquantized 27B/35B models (`gemma3_27b_it`, `medgemma_27b_it`,
+  `qwen3_6_27b`, `qwen3_6_35b_a3b`) are all sized for a single 80GB-class
+  GPU or two - likely too large per-GPU here too.
+- The two already-quantized configs (`qwen3_6_27b_awq_int4`,
+  `qwen3_6_35b_a3b_awq_4bit`) are the closest existing candidates to
+  actually fitting, though their current `tensor_parallel_size` (1 and 1)
+  may still need adjusting for comfortable KV-cache headroom on 16GB cards.
 
-**Time budget bumped.** `deucalion_orchestrator.sh`'s `--time` raised from
-`06:00:00` to `08:00:00`. The original 6h estimate (from the last handoff)
-only accounted for `8 models x up to 2400s boot each ~= 5.3h` and never
-added the judge's own boot time. Now that the judge is pinned to
-`DeepSeek-V4-Flash` (`startup_timeout_s: 3600`), worst-case boot time alone
-is `5.3h + 1h ~= 6.3h`, already past the old budget before counting any
-actual generation or judge-scoring time.
+**The user is choosing the actual model list themselves and will bring it
+to this session** - don't guess at model choices. Once you have that list,
+create a **new** `configs/runs/*.yaml` (don't overwrite
+`full_production.yaml`, which represents the Deucalion-scale run) and add
+matching `configs/models/*.yaml` entries sized correctly for whatever this
+cluster's real GPU spec turns out to be. Same for the judge model - neither
+current judge candidate (`deepseek_v4_flash_judge.yaml`, ~156GB;
+`gpt_oss_120b_judge.yaml`, ~117B) was sized for this hardware; a
+right-sized judge needs picking once the benchmarked-model list is settled.
 
-## 3. Current run status - read this first
+## Task list, roughly in order
 
-**A SLURM job is already in flight and unfinished.** Job `1760803`
-(`download_hf_assets`, submitted via `sbatch
-scripts/asset_caching/download_hf_assets.sh --models
-configs/models/judges/deepseek_v4_flash_judge.yaml --skip-datasets
---check-only`) was submitted to verify HF access to `DeepSeek-V4-Flash`
-before committing to the real ~156GB download. As of writing it has been
-**`PD` (pending, reason: `Priority`) for over 24 hours** - the
-`normal-a100-80` partition is under heavy contention (75 jobs pending at
-last check). SLURM's own backfill estimate currently projects a start
-around `2026-07-22T16:22:29` (re-check with `squeue -j 1760803 --start`,
-since this estimate has already slipped once and may again). This is
-**not a stuck or broken job** - just a long queue. No output/error log
-exists yet at `logs/asset_download/out/download_hf_assets_1760803.out` /
-`logs/asset_download/err/download_hf_assets_1760803.err` because it
-hasn't started running.
+1. **Confirm real hardware** on the rtx4060/haslab cluster (GPU count,
+   VRAM/GPU, node count available) - don't trust the "~4x16GB" guess above
+   without checking.
+2. **Work with the user to pick the benchmarked-model list and a judge
+   model** sized for that hardware, and build the corresponding
+   `configs/models/*.yaml` + a new `configs/runs/*.yaml`.
+3. **Review `scripts/orchestration/slurm_orchestrator.sh`'s SLURM
+   allocation** against the chosen models - it currently requests
+   `--nodes=2` with only `--time=02:00:00` and no explicit `--gpus`, which
+   was never verified against a real workload (unlike
+   `deucalion_orchestrator.sh`, which explicitly matches its allocation to
+   the production run). This needs a real decision once you know what's
+   actually running, not a guess.
+4. **Run a small validation pass first** - 50-sample limit (matching the
+   scale already proven in the devcontainer), same models, to confirm
+   telemetry and the pipeline generally work correctly on real cluster
+   hardware before committing to the full run. Check `outputs/analysis/`
+   afterward, don't just check for a zero exit code - look at the actual
+   charts/tables and sanity-check the numbers.
+5. **Decide the final sample size with the user** before the definitive
+   run - every run so far, including the devcontainer smoke test, has used
+   `eval_limit: 50`, which was explicitly smoke-test scale, not
+   necessarily final-thesis scale.
+6. **Run the definitive test.** One `sbatch` submission via
+   `slurm_orchestrator.sh` now produces the full pipeline: benchmark ->
+   judge -> analysis report, per the `run_pipeline.sh` change made last
+   session. Confirm this actually happens end-to-end on a real cluster
+   before treating it as reliable - it's real code, following the same
+   pattern as the rest of the script, but has not been tested against a
+   real SLURM environment.
 
-**The planned follow-up chain, agreed with the user but not yet
-executed:**
-1. Job `1760803` finishes -> read its log. If `DENIED`, stop and surface
-   it rather than guessing at a fix.
-2. If `OK` -> submit the real download, scoped to just
-   `DeepSeek-V4-Flash`: `sbatch scripts/asset_caching/download_hf_assets.sh
-   --models configs/models/judges/deepseek_v4_flash_judge.yaml
-   --skip-datasets` (no `--check-only`).
-3. If that download completes cleanly -> do a final readiness pass (model
-   landed under the correct `HF_HOME`, no stray
-   `RUN_CONFIG`/`JUDGE_MODEL_CONFIG`/`WORKDIR` env leakage, SIF/account
-   still fine - same checklist the original handoff laid out) and only
-   then run `bash scripts/orchestration/deucalion_orchestrator.sh`.
-4. Any failure at any step -> stop and report back rather than retrying
-   blindly or improvising a fix to a multi-hour production job.
+## Things to know before you start
 
-**Important caveat on autonomy:** the user gave verbal authorization
-*within that conversation* to execute steps 2-4 automatically, without
-re-asking, contingent on each step succeeding and on Claude's own judgment
-that it's ready. That authorization is scoped to the session it was given
-in - per this project's standing preferences (section 6 below), a new
-session should treat it as historical context explaining intent, not as
-standing permission, and should confirm before executing multi-hour
-cluster actions itself.
+- **Ephemeral HF caching is already configured for this cluster**
+  (`slurm_orchestrator.sh` sets `HF_CACHE_MODE=ephemeral`,
+  `HF_EVICT_BETWEEN_MODELS=1`) - weights download fresh into a job-scoped
+  temp dir and get evicted between models rather than accumulating in
+  persistent storage. This was a deliberate choice given this cluster's
+  project-folder quota (the user mentioned ~50GB) - don't "fix" this into
+  persistent caching without checking whether the quota problem is still
+  real.
+- **Telemetry requires zero manual setup on SLURM** - `run_pipeline.sh`
+  already launches `scripts/telemetry/nvidia_smi_agent.py` on every
+  allocated node and auto-generates `configs/runtime/telemetry.auto.yaml`
+  with `collector: remote_http` pointing at them. This is different from
+  the devcontainer path (which uses the in-process `nvidia_smi` collector
+  instead) - the two collectors produce differently-named output fields,
+  and `configs/metrics/systems.yaml`'s `telemetry.fields` list already
+  covers both shapes, so this shouldn't need touching either way.
+- **Run with `bash`, never `sbatch` directly** on `slurm_orchestrator.sh` -
+  it submits the real job itself. Submitting `run_pipeline.sh` directly
+  will fail loudly (`WORKDIR` is required and unset outside the wrapper).
+- **Don't hand-author `configs/runtime/telemetry.auto.yaml`** - it's
+  generated fresh per run by the shell script.
+- Model identity throughout the framework comes from **config file name**,
+  not any field inside the file - `name:` fields were removed from every
+  model config last session because they were confirmed dead (never read).
+  Don't reintroduce them as if they matter.
+- If you find yourself about to hardcode a dataset/task/field name into
+  Python or into `scripts/analysis/generate_report.py`'s logic (as opposed
+  to its small curation constants at the top, which are meant to be
+  edited), stop - that's very likely the wrong layer. The project's
+  explicit standing preference is that this kind of curation belongs at
+  the data source (a dataset's `mapping.grouping` vs `mapping.metadata`,
+  for instance) or in a clearly-labeled constant, not buried in generic
+  code.
 
-**Also important - the automation didn't survive.** A background watcher
-was set up in the previous session to detect job `1760803` finishing and
-auto-continue the chain. The user closed VS Code to go do other work in a
-local devcontainer; the background task was torn down without a
-completion record (`status: stopped`, no output). **Nobody is currently
-watching this job.** Whoever picks this up needs to manually check
-`squeue -j 1760803` and re-arm monitoring, or just check back periodically.
+## Backlog
 
-## 4. What to check once the benchmarking run itself actually happens
+- **Reports-per-run vs. overwrite-in-place**: `outputs/reports/` currently
+  gets overwritten on every invocation, no run history preserved. Open
+  discussion, not yet decided.
+- **BERTScore**: discussed as a possible additional generative-quality
+  metric, deliberately deferred until after everything above. Worth
+  raising with the user if there's time before the definitive run, not
+  before.
 
-(Carried forward from the original handoff, unchanged - still applies once
-step 4 of the chain above actually runs.)
+Everything else that was previously tracked as backlog (older architectural
+debates, potential improvements like multi-turn fewshot / API-hosted models
+/ LLM-jury, and the template-file rebuild) was explicitly closed out by the
+user at the end of the last session - don't resurrect these without them
+raising it first.
 
-- `outputs/reports/run_summary.json` - top-level pass/fail per task.
-- `outputs/reports/<task_id>/summary.json` - per-model entries include a
-  `datasets` field with `{attempted, succeeded, error}` per dataset.
-- `outputs/reports/<task_id>/<model>/cognitive_summary.json` - for
-  OECR/SRC, confirm the `llm_judge` block got merged in.
-- Actual wall-clock time for the whole job, and a per-model boot-time
-  breakdown if visible in logs - first real data point for calibrating
-  `--time` and `startup_timeout_s` values, which have been guesses/
-  estimates until now (see the `--time` bump in section 2 above, itself
-  still an estimate).
-- Note: `outputs/` already contains stale data from a June 27 smoke test
-  (`cdkr`/`oecr` only, 2 models: `gemma3_27b_it`, `medgemma_27b_it`) - the
-  real run will overwrite/mix with it, which is fine per the user (see
-  section 6 - per-run output separation is a known future decision, not
-  yet implemented).
-
-## 5. Backlog - condensed, self-contained (carried forward from the last
-handoff, don't assume memory access here)
-
-**Architectural decisions, yours to call:**
-- OECR's `reasoning_validity` judge rubric grades on medical soundness,
-  not strict reference-matching - a deliberate, previously-made call, kept
-  open because it was flagged as "worth revisiting."
-- Reports-per-run vs. overwrite-in-place (`outputs/reports/` currently
-  overwrites every invocation) - actively being decided, not just noted.
-- Judge model selection is still architecturally open beyond this run:
-  this session only decided to download `DeepSeek-V4-Flash` first to save
-  time, not that it's the final answer over `gpt-oss-120b`/`gemma-3-4b-it`.
-
-**Potential improvements, low priority, only after everything else:**
-- Fewshot examples are concatenated into one flat chat turn instead of
-  real multi-turn message history - a real interface change, not urgent.
-- API-hosted models (Gemini specifically, for its free tier) - verified
-  Gemini's OpenAI-compatible endpoint supports everything the existing
-  `OpenAIBackend`/`JudgeClient` classes need; the actual blocker is that
-  `orchestrator.py`/`llm_judge_run.py` unconditionally boot a local vLLM
-  server for every model, with no path to just point at an external API.
-- LLM-jury (3-judge majority vote instead of one judge) - architecturally
-  cheap to add, but 3x judge-pass compute cost is the real blocker, plus
-  an unresolved tie-break rule for genuine 3-way label disagreement.
-
-**Known upcoming work, not yet scoped:** the user has flagged "a major
-task regarding output analysis" they intend to work on before concluding
-this backlog. No further detail exists yet - don't guess at its shape,
-just be aware it's coming.
-
-**Final step, deferred until everything above is done:** a dead-code
-sweep, scoped to the Python side (`llm_bench/`,
-`scripts/orchestration/*.py`) - the SLURM `.sh` scripts have now had two
-dead-code/consistency passes (the original one, plus this session's
-`python_vllm.sh` split and `HF_HOME` fixes).
-
-## 6. Standing preferences (carried forward, still apply)
+## Standing preferences
 
 - Ask before editing shared/production config for local convenience; fix
-  genuine, objectively-wrong bugs directly without asking.
+  genuine, objectively-wrong bugs directly without asking, but say clearly
+  what was found and what was changed.
 - Don't silently drop or "helpfully" resolve backlog items - surface them.
-- Verify claims empirically. Every fix in this project's history was
-  validated by actually running something and checking real output, not
-  just reasoning about what should happen.
-- Never commit without being explicitly asked, even when a commit would
-  obviously be useful (see section 0 - this session ended with real,
-  reviewed, uncommitted changes and deliberately did not commit them).
-- New this session: don't treat cross-session verbal authorization (e.g.
-  "you can launch X automatically once Y succeeds") as carrying forward
-  into a new session/context - it explains prior intent, but a fresh
-  session should still confirm before taking equivalent multi-hour/
-  resource-consuming cluster actions itself.
-- New this session: background watchers/monitors do not survive the
-  session/IDE closing. Don't promise continued autonomous monitoring
-  across a session boundary - the next session (or a resumed one) needs to
-  manually re-check state.
+- Verify claims empirically. Nearly everything fixed in this project's
+  history was validated by actually running something and checking real
+  output, not just reasoning about what should happen - keep that bar.
+- Don't treat cross-session verbal authorization as carrying forward into a
+  new session - confirm before taking multi-hour/resource-consuming
+  cluster actions.
+- Background watchers/monitors do not survive a session/IDE closing - don't
+  promise continued autonomous monitoring across a session boundary.
+- Never commit without being explicitly asked.

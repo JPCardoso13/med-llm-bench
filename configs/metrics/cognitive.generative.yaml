@@ -4,21 +4,17 @@ task_type: generative
 
 enabled: true
 
-# Per-value breakdowns for whatever grouping fields the dataset defines -
-# auto-discovered, not named here.
+# Auto-discovers whatever grouping fields the dataset defines.
 enable_grouping: true
 
-# Whether parsing-diagnostic counts appear in output. Not yet wired - the
-# calculator always includes this block today.
+# Not yet wired - the calculator always includes this block today.
 include_parsing_summary: true
 
 extraction:
   answer:
     pattern: (?is)final\s*answer[:\-\s]*(.*?)(?=\n\s*explanation\s*[:\-]|$)
     trim: true
-    # Cuts an unlabeled "Explanation:" bleeding into the answer capture,
-    # flags the sample as contaminated.
-    contamination_markers: [explanation]
+    contamination_markers: [explanation]  # cuts unlabeled bleed-through, flags contaminated
   ref_reasoning:
     pattern: (?is)explanation[:\-\s]*(.*)$
     trim: true
@@ -32,9 +28,7 @@ reporting:
   include_text_preview: true
   text_preview_chars: 220
 
-# One list entry per text-comparison metric, each a (name, target) pair.
-# target must match a name under extraction: and a BenchmarkResult.ref_fields
-# key (today: answer, ref_reasoning). New metric = new entry, not a new block.
+# target must match a name under extraction: and a ref_fields key.
 similarity:
   enabled: true
   metrics:

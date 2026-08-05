@@ -1,68 +1,37 @@
-# ==============================================================================
-# DATASET CONFIGURATION TEMPLATE
-# ==============================================================================
+# Dataset config template. Use either hub_path or data_files under source.
 
-# 1. SOURCE DEFINITION (Required)
-# Define where the data lives. You MUST use either `hub_path` OR `data_files`.
 source:
-  # Required stable dataset name. Used to namespace each sample ID and stored
-  # in the sample `source` field (e.g., final ID format: my_dataset:123).
   name: "my_dataset_name"
-
-  # OPTION A: Hugging Face Hub
   hub_path: "Organization/DatasetName"
-  subset: "OptionalSubset" # Remove if the dataset has no subsets
+  subset: "OptionalSubset"
 
-  # OPTION B: Single Local File or Direct URL (Requires 'splits' block below to divide it)
   # data_files: "data/my_dataset.parquet"
-
-  # OPTION C: Explicit Local Files (Omit the 'splits' block below if using this)
   # data_files:
   #   eval: "data/eval_set.jsonl"
   #   fewshot: "data/fewshot_set.jsonl"
 
-# 2. SPLITS DEFINITION (Required for Option A & B above)
-# Uses Hugging Face slicing syntax to grab data.
 splits:
-  eval: "test"                # e.g., "test", "test[:1000]"
-  fewshot: "train"            # e.g., "train", "train[:50]" (can be null if 0-shot only)
+  eval: "test"
+  fewshot: "train"
 
-# 3. SCHEMA (Required)
-schema: "MCQSample"           # Options: "MCQSample" or "GenerativeSample"
+schema: "MCQSample"  # or "GenerativeSample"
 
-# 4. PREPROCESSING (Optional)
-# Point to a Python file containing a `def preprocess(row):` function if the data
-# needs complex manipulation (like list-to-dict conversion) before mapping.
 # preprocess_script: "utils/custom_transforms/my_dataset_transform.py"
 
-# 5. COLUMN MAPPING (Required)
-# Map the raw dataset columns (values) to the schema's required fields.
 mapping:
-  # Base Fields
-  # Optional source-side ID. If provided, final ID is: source.name:source_id.
-  # If omitted, final ID is: source.name:<stable_hash_of_mapped_content>.
-  # Duplicate final IDs are dropped with a warning.
   id: "raw_id_column"
   question: "prompt_text"
 
-  # MCQ Specific Fields (Omit if Generative)
+  # MCQ
   options: "choices_dict"
   answer_idx: "correct_key"
 
-  # Generative Specific Fields (Omit if MCQ)
+  # Generative
   # answer: "ground_truth"
   # context: "reference_text"
 
-  # Jinja Templating (Optional)
-  # You can combine columns or format text on the fly using {{ column_name }}
-  # question: "{{ premise }}\n\n{{ hypothesis }}"
-
-  # Metadata & Grouping (Optional dictionaries)
-  # Grouping is used for stratified metric reporting (e.g., accuracy by category)
+  # Grouping fields get stratified breakdowns; metadata fields don't.
   grouping:
     category: "domain_column"
-    difficulty: "level_column"
-
-  # Metadata stores raw values for debugging or reference but isn't aggregated
   metadata:
     url: "source_link"

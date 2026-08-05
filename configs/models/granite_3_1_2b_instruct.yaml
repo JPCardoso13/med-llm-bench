@@ -1,15 +1,7 @@
-name: granite_3_1_2b_instruct
 engine: vllm
 model_id: ibm-granite/granite-3.1-2b-instruct
 backend_api: openai_compatible
-# Replaces llama3_2_3b_instruct in local_smoke.yaml - Llama-3.2-3B-Instruct
-# is a gated HF repo and this devcontainer's HF_TOKEN isn't authorized for
-# it (confirmed via a real boot attempt: 403 GatedRepoError). Granite is
-# ungated, confirmed booting successfully with max_model_len=16384 (well
-# beyond phi3_mini_4k_instruct's 4096, which is what it's replacing this
-# model for in the first place), and is a distinct family (IBM) from both
-# qwen2_5_3b_instruct (Alibaba) and the local judge, gemma3_4b_it_judge
-# (Google).
+# Local test model, distinct vendor family (IBM) from qwen/gemma.
 tensor_parallel_size: 1
 max_model_len: 16384
 gpu_memory_utilization: 0.90

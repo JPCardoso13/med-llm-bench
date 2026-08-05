@@ -1,4 +1,3 @@
-name: medgemma_27b_it
 engine: vllm
 model_id: google/medgemma-27b-it
 backend_api: openai_compatible

@@ -1,19 +1,6 @@
-# Local devcontainer smoke-testing: 3 small models that each fit a single
-# 16GB consumer GPU, all 3 tasks. Note: this run config only selects the
-# benchmarked models - the judge is a separate mechanism entirely
-# (--judge-model / JUDGE_MODEL_CONFIG pointed at
-# configs/models/judges/gemma3_4b_it_judge.yaml for local testing).
-#
-# phi3_mini_4k_instruct dropped (2026-07-18): its native 4096 context
-# repeatedly caused per-sample failures on real datasets (medcalcbench,
-# pubmedsum) that needed more room. First replacement attempt,
-# llama3_2_3b_instruct, turned out to be a gated HF repo this
-# devcontainer's token can't access (confirmed via a real boot failure) -
-# replaced again with granite_3_1_2b_instruct, ungated and confirmed
-# booting cleanly with max_model_len=16384.
-#
-# gemma_3_1b_it added as a third, distinct-vendor-family model
-# (Alibaba/IBM/Google across the three) - confirmed booting cleanly.
+# Local devcontainer smoke-testing: 3 small models, one per vendor family,
+# each fitting a single 16GB GPU. The judge is a separate mechanism
+# (--judge-model, see configs/models/judges/).
 tasks:
   - cdkr
   - oecr

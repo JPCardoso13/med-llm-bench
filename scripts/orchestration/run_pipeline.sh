@@ -103,7 +103,7 @@ mkdir -p configs/runtime
 # leading "ALL," plus every SINGULARITYENV_* pair here) - so these values
 # only need to exist in this one string, not as separately exported shell
 # variables too.
-singularity_exports="ALL,SINGULARITYENV_HF_HOME=$HF_HOME,SINGULARITYENV_HUGGINGFACE_HUB_CACHE=$HF_HOME/hub,SINGULARITYENV_HF_HUB_OFFLINE=$HF_HUB_OFFLINE,SINGULARITYENV_TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE,SINGULARITYENV_HF_DATASETS_OFFLINE=$HF_DATASETS_OFFLINE,SINGULARITYENV_HF_OFFLINE=$HF_OFFLINE,SINGULARITYENV_HF_EVICT_BETWEEN_MODELS=$HF_EVICT_BETWEEN_MODELS,SINGULARITYENV_PYTORCH_ALLOC_CONF=expandable_segments:True,SINGULARITYENV_PYTHONPATH=$WORKDIR${PYTHONPATH:+:$PYTHONPATH},SINGULARITYENV_LLM_API_KEY=${LLM_API_KEY:-EMPTY},SINGULARITYENV_LLM_BENCH_RUNTIME_CONFIG=configs/runtime/telemetry.auto.yaml,SINGULARITYENV_LLM_MAX_TOKENS_DEFAULT=1024,SINGULARITYENV_LLM_NODE_COUNT=$node_count,SINGULARITYENV_SERVE_PORT=$SERVE_PORT,SINGULARITYENV_RUN_CONFIG=$RUN_CONFIG"
+singularity_exports="ALL,SINGULARITYENV_HF_HOME=$HF_HOME,SINGULARITYENV_HUGGINGFACE_HUB_CACHE=$HF_HOME/hub,SINGULARITYENV_HF_HUB_OFFLINE=$HF_HUB_OFFLINE,SINGULARITYENV_TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE,SINGULARITYENV_HF_DATASETS_OFFLINE=$HF_DATASETS_OFFLINE,SINGULARITYENV_HF_OFFLINE=$HF_OFFLINE,SINGULARITYENV_HF_EVICT_BETWEEN_MODELS=$HF_EVICT_BETWEEN_MODELS,SINGULARITYENV_PYTORCH_ALLOC_CONF=expandable_segments:True,SINGULARITYENV_PYTHONPATH=$WORKDIR${PYTHONPATH:+:$PYTHONPATH},SINGULARITYENV_LLM_API_KEY=${LLM_API_KEY:-EMPTY},SINGULARITYENV_LLM_NODE_COUNT=$node_count,SINGULARITYENV_SERVE_PORT=$SERVE_PORT,SINGULARITYENV_RUN_CONFIG=$RUN_CONFIG"
 
 mkdir -p logs/orchestration/out logs/orchestration/err logs/vllm outputs/reports outputs/raw outputs/judged
 
@@ -191,6 +191,7 @@ srun --overlap --nodes=1 --ntasks=1 \
     python3 -u "$python_script" || EXIT_CODE=$?
 
 echo "Orchestrator exited with code: $EXIT_CODE"
+ORCHESTRATOR_EXIT_CODE=$EXIT_CODE
 
 if [[ "$EXIT_CODE" -eq 0 ]]; then
     echo "Running LLM-as-judge pass: $JUDGE_MODEL_CONFIG"
@@ -205,6 +206,24 @@ if [[ "$EXIT_CODE" -eq 0 ]]; then
     EXIT_CODE=$JUDGE_EXIT_CODE
 else
     echo "Skipping LLM-as-judge pass: orchestrator did not exit cleanly"
+fi
+
+# Report generation runs whenever the orchestrator produced real output, even
+# if the judge pass itself failed (cognitive/systems reports are still
+# useful without judge data - generate_report.py already handles a missing
+# judge distribution gracefully). It's best-effort: a failure here doesn't
+# change EXIT_CODE, since it doesn't affect the benchmark/judge data already
+# safely on disk, only the human-readable charts/tables built from it.
+if [[ "$ORCHESTRATOR_EXIT_CODE" -eq 0 ]]; then
+    echo "Generating analysis report..."
+    REPORT_EXIT_CODE=0
+    srun --overlap --nodes=1 --ntasks=1 \
+        --export="${singularity_exports}" \
+        "$SINGULARITY_BIN" exec --nv --env-file .env "$SIF" \
+        python3 -u scripts/analysis/generate_report.py || REPORT_EXIT_CODE=$?
+    echo "Report generation exited with code: $REPORT_EXIT_CODE"
+else
+    echo "Skipping report generation: orchestrator did not exit cleanly"
 fi
 
 exit $EXIT_CODE

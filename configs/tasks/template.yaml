@@ -1,28 +1,15 @@
-schema_version: 1
-
-# Stable task identifier (matches naming used in configs/prompts/)
 task_id: task_name
-
-# Task type controls formatter/evaluator family (mcq | generative)
-task_type: mcq
+task_type: mcq  # or generative
 
 prompt:
-  # Prompt config that defines system prompt and user/fewshot templates
   config: configs/prompts/task_name.yaml
 
-# Datasets that belong to this task.
-# Each entry points to an existing dataset config in configs/datasets/.
 datasets:
   - name: dataset_a
     config: configs/datasets/dataset_a.yaml
     enabled: true
-    # Optional per-dataset run cap for quick smoke tests. null means full split.
-    eval_limit: null
-    # Optional per-dataset generation length override - falls back to
-    # execution.max_tokens below when omitted. Useful when datasets in the
-    # same task have very different expected answer lengths (e.g. a
-    # long-document summary vs. a short MCQ letter).
-    # max_tokens: 768
+    eval_limit: null  # per-dataset sample cap, null = full split
+    # max_tokens: 768  # per-dataset override of execution.max_tokens below
 
   - name: dataset_b
     config: configs/datasets/dataset_b.yaml
@@ -30,36 +17,18 @@ datasets:
     eval_limit: null
 
 execution:
-  # Few-shot controls used by formatter/runner.
   num_fewshot: 3
-  # Flush interval for writing raw results.
   flush_every: 10
-  # Fixes which fewshot examples get drawn per sample - omit for the old
-  # unseeded (non-reproducible) behavior, set an int for reproducible runs
-  # where every model sees the same fewshot examples per question.
-  fewshot_seed: 42
-  # Default generation length budget, used by any dataset in this task that
-  # doesn't set its own max_tokens above.
+  fewshot_seed: 42  # omit for unseeded/non-reproducible draws
   max_tokens: 1024
-  # Consecutive per-sample generation failures before the circuit breaker
-  # aborts the dataset (systemic failure, e.g. backend unreachable) rather
-  # than limping through - resets to 0 on every success. Optional, defaults
-  # to 5 if omitted.
-  max_consecutive_failures: 5
+  max_consecutive_failures: 5  # optional, defaults to 5
 
 runtime:
-  # Runtime telemetry collection config (collector/endpoints/timeouts).
-  # configs/runtime/telemetry.auto.yaml is generated dynamically per-run by
-  # multi_model_orchestration.sh (or set enabled: false for local runs) -
-  # don't hand-author a static file at this path, point at the auto one.
+  # Point at the auto-generated file, not a hand-authored one.
   telemetry_config: configs/runtime/telemetry.auto.yaml
 
 metrics:
-  # Systems-level metric profile consumed by metrics calculator.
   systems_profile: configs/metrics/systems.yaml
-  # Cognitive metrics profile for evaluation (accuracy, parsing, etc).
-  # No standalone template profile exists right now - point this at whichever
-  # real profile matches your new task's task_type (cognitive.mcq.yaml for
-  # mcq, cognitive.generative.yaml for generative) as a starting point.
+  # No standalone template profile - use cognitive.mcq.yaml or
+  # cognitive.generative.yaml as a starting point instead.
   cognitive_profile: configs/metrics/cognitive.mcq.yaml
-

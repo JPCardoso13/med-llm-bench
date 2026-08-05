@@ -51,10 +51,8 @@ usage:
     - max
     - sum
 
-# Perplexity of the model's own generated tokens (exp of mean negative
-# log-probability) - a confidence/calibration signal, not a correctness
-# one. Requires the backend to request logprobs (openai_backend.py does by
-# default); absent for any raw result predating that change.
+# Perplexity of the model's own generated tokens - a confidence signal, not
+# a correctness one.
 generation:
   enabled: true
   fields:
@@ -64,17 +62,9 @@ generation:
     - min
     - max
 
-# Two field sets below because the two telemetry collectors produce
-# different key names for the same underlying stats: remote_http (SLURM/
-# multi-node, via nvidia_smi_agent.py) reports cluster-wide aggregates
-# under *_cluster names plus sample_count_total/node_count_reporting;
-# nvidia_smi (local/single-machine, in-process) reports the same stats
-# without the _cluster suffix and has no per-node concept at all. Whichever
-# collector wasn't used for a given run just shows up as a missing field
-# (harmless - same as any other backend-capability gap) rather than picking
-# one shape and leaving the other silently broken. True per-node breakdown
-# for multi-node runs (remote_http's node_results) isn't representable here
-# yet - that needs a group_by-style mechanism, not a fixed field list.
+# Two field sets: remote_http (multi-node) uses *_cluster names, nvidia_smi
+# (local) doesn't. Whichever collector isn't in use just shows up as missing
+# fields, not an error.
 telemetry:
   enabled: true
   fields:
