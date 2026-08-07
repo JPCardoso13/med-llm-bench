@@ -108,7 +108,7 @@ def _wait_for_ready(base_url: str, process: subprocess.Popen[Any], timeout_s: in
     return False
 
 
-def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path = "logs/vllm", timeout_s: int = 240) -> VLLMHandle:
+def start_vllm(model_cfg: Dict[str, Any], model_name: str, port: int = 8000, logs_dir: str | Path = "logs/vllm", timeout_s: int = 240) -> VLLMHandle:
     logs_dir = Path(logs_dir)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -119,7 +119,7 @@ def start_vllm(model_cfg: Dict[str, Any], port: int = 8000, logs_dir: str | Path
     mode = "distributed" if distributed else ("multi_gpu" if tp > 1 else "single")
 
     cmd = _build_cmd(model_cfg, port, distributed)
-    log_path = logs_dir / f"vllm_{model_cfg.get('name','model')}_{mode}.log"
+    log_path = logs_dir / f"vllm_{model_name}_{mode}.log"
 
     env = os.environ.copy()
 

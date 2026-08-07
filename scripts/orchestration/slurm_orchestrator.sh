@@ -24,8 +24,7 @@ sbatch \
     --partition=rtx4060 \
     --account=haslab \
     --nodes=2 \
-    --exclude=aurora[04-05] \
-    --time=02:00:00 \
+    --time=03:00:00 \
     --output=logs/orchestration/out/slurm_orchestrator_%j.out \
     --error=logs/orchestration/err/slurm_orchestrator_%j.err \
     "$SCRIPT_DIR/run_pipeline.sh"

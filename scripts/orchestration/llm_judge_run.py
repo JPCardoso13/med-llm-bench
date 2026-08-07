@@ -117,10 +117,12 @@ def main() -> None:
     args = parse_args()
 
     judge_cfg = load_yaml(args.judge_model)
+    judge_model_name = Path(args.judge_model).stem
     startup_timeout_s = int(judge_cfg.get("startup_timeout_s", args.startup_timeout_s))
 
     handle = start_vllm(
         model_cfg=judge_cfg,
+        model_name=judge_model_name,
         port=args.serve_port,
         logs_dir=SERVE_LOG_DIR,
         timeout_s=startup_timeout_s,

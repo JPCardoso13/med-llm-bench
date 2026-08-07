@@ -341,75 +341,92 @@ def compute_and_save_metrics(model_name: str, raw_path: Path, task_id: str, syst
     return systems_summary_path, cognitive_summary_path
 
 
-def run_single_task(task_cfg_path: Path, model_configs: list[Path], serve_port: int, startup_timeout_s: int) -> dict[str, Any]:
-    """Run all models for a single task."""
+def load_task_bundle(task_cfg_path: Path) -> dict[str, Any]:
+    """Preload a task's static pieces (profiles, runtime config, id) once.
+
+    None of this depends on which model is currently being served, so it's
+    loaded once per task rather than once per (task, model) pair.
+    """
     task_cfg = load_yaml(task_cfg_path)
     task_id = task_cfg.get("task_id")
-    
     if not task_id:
         raise ValueError(f"Task config {task_cfg_path} missing 'task_id' field")
-
-    print(f"\n{'='*80}")
-    print(f"TASK: {task_id}")
-    print(f"{'='*80}")
 
     systems_profile = load_yaml(task_cfg["metrics"]["systems_profile"])
     cognitive_profile_path = task_cfg.get("metrics", {}).get("cognitive_profile")
     cognitive_profile = load_yaml(cognitive_profile_path) if cognitive_profile_path else {"enabled": False}
+    runtime_cfg = load_yaml(resolve_runtime_config_path(task_cfg))
 
-    runtime_cfg_path = resolve_runtime_config_path(task_cfg)
-    runtime_cfg = load_yaml(runtime_cfg_path)
+    return {
+        "task_id": task_id,
+        "task_cfg": task_cfg,
+        "systems_profile": systems_profile,
+        "cognitive_profile": cognitive_profile,
+        "runtime_cfg": runtime_cfg,
+    }
 
-    summary = {"task_id": task_id, "models": []}
 
-    for model_config_path in model_configs:
-        model_name = model_config_path.stem
-        model_cfg = load_yaml(model_config_path)
+def run_single_model(model_config_path: Path, task_bundles: list[dict[str, Any]], serve_port: int, startup_timeout_s: int) -> dict[str, dict[str, Any]]:
+    """Serve one model once and run it across every task.
 
-        print(f"\n== Model: {model_name} ==")
-        handle = None
-        try:
-            model_startup_timeout_s = int(model_cfg.get("startup_timeout_s", startup_timeout_s))
-            handle = start_vllm(
-                model_cfg=model_cfg,
-                port=serve_port,
-                logs_dir=SERVE_LOG_DIR,
-                timeout_s=model_startup_timeout_s,
-            )
-            print(f"  Serving at {handle.base_url} (mode={handle.mode})")
+    Model-outer/task-inner: each model is downloaded and cold-started by
+    vLLM exactly once for the whole run, then reused across all tasks,
+    instead of the previous task-outer/model-inner nesting which restarted
+    (and, under HF_EVICT_BETWEEN_MODELS, re-downloaded) every model once per
+    task - Nx redundant loads for an N-task run.
+    """
+    model_name = model_config_path.stem
+    model_cfg = load_yaml(model_config_path)
 
-            os.environ["LLM_BASE_URL"] = handle.base_url
-            raw_path, dataset_status = run_benchmark_for_model(model_cfg, model_name, task_cfg, runtime_cfg, handle.base_url, task_id)
+    print(f"\n== Model: {model_name} ==")
+    entries_by_task: dict[str, dict[str, Any]] = {}
+    handle = None
+    try:
+        model_startup_timeout_s = int(model_cfg.get("startup_timeout_s", startup_timeout_s))
+        handle = start_vllm(
+            model_cfg=model_cfg,
+            model_name=model_name,
+            port=serve_port,
+            logs_dir=SERVE_LOG_DIR,
+            timeout_s=model_startup_timeout_s,
+        )
+        print(f"  Serving at {handle.base_url} (mode={handle.mode})")
+        os.environ["LLM_BASE_URL"] = handle.base_url
 
-            systems_path, cognitive_path = compute_and_save_metrics(model_name, raw_path, task_id, systems_profile, cognitive_profile)
-            print(f"  Systems summary: {systems_path}")
-            if cognitive_path:
-                print(f"  Cognitive summary: {cognitive_path}")
+        for bundle in task_bundles:
+            task_id = bundle["task_id"]
+            print(f"\n  -- Task: {task_id} --")
+            try:
+                raw_path, dataset_status = run_benchmark_for_model(
+                    model_cfg, model_name, bundle["task_cfg"], bundle["runtime_cfg"], handle.base_url, task_id
+                )
+                systems_path, cognitive_path = compute_and_save_metrics(
+                    model_name, raw_path, task_id, bundle["systems_profile"], bundle["cognitive_profile"]
+                )
+                print(f"    Systems summary: {systems_path}")
+                if cognitive_path:
+                    print(f"    Cognitive summary: {cognitive_path}")
+                entries_by_task[task_id] = {
+                    "model_name": model_name,
+                    "raw_results": str(raw_path),
+                    "systems_summary": str(systems_path),
+                    "cognitive_summary": str(cognitive_path) if cognitive_path else None,
+                    "serve_mode": handle.mode,
+                    "datasets": dataset_status,
+                }
+            except Exception as exc:
+                print(f"  ERROR processing {model_name} on task {task_id}: {exc}")
+                entries_by_task[task_id] = {"model_name": model_name, "error": str(exc)}
+    except Exception as exc:
+        print(f"ERROR starting {model_name}: {exc}")
+        for bundle in task_bundles:
+            entries_by_task[bundle["task_id"]] = {"model_name": model_name, "error": str(exc)}
+    finally:
+        stop_vllm(handle)
+        time.sleep(8)
+        maybe_evict_hf_cache_between_models()
 
-            summary["models"].append({
-                "model_name": model_name,
-                "raw_results": str(raw_path),
-                "systems_summary": str(systems_path),
-                "cognitive_summary": str(cognitive_path) if cognitive_path else None,
-                "serve_mode": handle.mode,
-                "datasets": dataset_status,
-            })
-        except Exception as exc:
-            print(f"ERROR processing {model_name}: {exc}")
-            summary["models"].append({"model_name": model_name, "error": str(exc)})
-        finally:
-            stop_vllm(handle)
-            time.sleep(8)
-            maybe_evict_hf_cache_between_models()
-
-    # Write task-specific summary
-    task_report_dir = REPORTS_DIR / task_id
-    task_report_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = task_report_dir / "summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"\nTask report written to: {summary_path}")
-
-    return summary
+    return entries_by_task
 
 
 def main() -> None:
@@ -431,18 +448,36 @@ def main() -> None:
     serve_port = int(os.getenv("SERVE_PORT", "8000"))
     startup_timeout_s = int(os.getenv("VLLM_STARTUP_TIMEOUT_S", "1800"))
 
-    all_summaries = {"tasks": []}
-
+    task_bundles: list[dict[str, Any]] = []
+    broken_tasks: list[dict[str, Any]] = []
     for task_cfg_path in task_configs:
         try:
-            task_summary = run_single_task(task_cfg_path, model_configs, serve_port, startup_timeout_s)
-            all_summaries["tasks"].append(task_summary)
+            task_bundles.append(load_task_bundle(task_cfg_path))
         except Exception as exc:
             print(f"ERROR processing task {task_cfg_path.stem}: {exc}")
-            all_summaries["tasks"].append({"task_id": task_cfg_path.stem, "error": str(exc)})
+            broken_tasks.append({"task_id": task_cfg_path.stem, "error": str(exc)})
+
+    task_models: dict[str, list[dict[str, Any]]] = {b["task_id"]: [] for b in task_bundles}
+
+    for model_config_path in model_configs:
+        entries_by_task = run_single_model(model_config_path, task_bundles, serve_port, startup_timeout_s)
+        for task_id, entry in entries_by_task.items():
+            task_models[task_id].append(entry)
+
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    all_summaries = {"tasks": []}
+    for bundle in task_bundles:
+        task_id = bundle["task_id"]
+        task_summary = {"task_id": task_id, "models": task_models[task_id]}
+        task_report_dir = REPORTS_DIR / task_id
+        task_report_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = task_report_dir / "summary.json"
+        summary_path.write_text(json.dumps(task_summary, indent=2), encoding="utf-8")
+        print(f"\nTask report written to: {summary_path}")
+        all_summaries["tasks"].append(task_summary)
+    all_summaries["tasks"].extend(broken_tasks)
 
     # Write overall multi-task summary
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     overall_summary_path = REPORTS_DIR / "run_summary.json"
     overall_summary_path.write_text(json.dumps(all_summaries, indent=2), encoding="utf-8")
     print(f"\n{'='*80}")

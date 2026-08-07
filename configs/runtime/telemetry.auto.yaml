@@ -1,4 +1,8 @@
 telemetry:
   enabled: true
-  collector: nvidia_smi
-  poll_interval_s: 0.5
+  collector: remote_http
+  timeout_s: 1.5
+  window_path: /window
+  endpoints:
+    - http://192.168.112.13:9101
+    - http://192.168.112.14:9101
