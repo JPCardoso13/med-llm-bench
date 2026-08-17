@@ -1,0 +1,15 @@
+engine: vllm
+model_id: google/gemma-3-27b-it
+backend_api: openai_compatible
+# Same model as gemma3_27b_it.yaml, but that config is TP=1 for Deucalion's
+# 80GB A100s. Here (16GB cards): 32 attention heads / 16 KV heads caps valid
+# TP at 1/2/4/8 - not 5/6/7. TP=4 would leave ~0.9GB/GPU for KV cache (OOM
+# risk); TP=8 (~6.75GB/GPU weights, ~7.65GB headroom) needs all 8 nodes.
+tensor_parallel_size: 8
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+# Measured real download speed on this cluster: ~11MB/s (tested directly,
+# hf_transfer doesn't help). 54GB / 11MB/s ~= 82min raw, x8 nodes could
+# contend for shared bandwidth - generous margin given TP=8.
+startup_timeout_s: 14400

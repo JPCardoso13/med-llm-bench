@@ -1,0 +1,16 @@
+engine: vllm
+model_id: meta-llama/Meta-Llama-3-8B-Instruct
+backend_api: openai_compatible
+# Base counterpart to llama3_openbiollm_8b.yaml. 32 attention heads / 8 KV
+# heads, ~16GB BF16 weights - doesn't fit a single 16GB GPU with any KV
+# cache headroom; TP=2 gives ~8GB/GPU.
+tensor_parallel_size: 2
+# Model's real max_position_embeddings is 8192 (confirmed via config.json) -
+# the catalog-wide 16384 default vLLM rejects outright for this model.
+max_model_len: 8192
+gpu_memory_utilization: 0.90
+enforce_eager: false
+# ~11MB/s measured on this cluster (real observed: this exact model timed
+# out mid-download at the old 2400s/40min value); 16GB raw ~24min, generous
+# margin given observed real-world time already exceeded the raw estimate.
+startup_timeout_s: 5400

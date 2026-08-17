@@ -1,0 +1,18 @@
+# The definitive benchmarking run on the rtx4060/haslab cluster (16GB/GPU) -
+# a distinct model roster from full_production.yaml (sized for Deucalion's
+# 4x80GB A100s), chosen to preserve the same evaluation axes (dense vs MoE,
+# fine-tuned vs base at two size tiers) at hardware the models actually fit.
+tasks:
+  - cdkr
+  - oecr
+  - src
+
+models:
+  - qwen3_6_27b_fp8
+  - qwen3_6_27b_awq_quanttrio
+  - qwen3_6_35b_a3b_fp8
+  - qwen3_6_35b_a3b_awq_quanttrio
+  - gemma3_27b_it_rtx4060
+  - medgemma_27b_text_it_rtx4060
+  - llama3_8b_instruct
+  - llama3_openbiollm_8b

@@ -1,0 +1,13 @@
+engine: vllm
+model_id: Qwen/Qwen3.6-35B-A3B-FP8
+backend_api: openai_compatible
+# rtx4060/haslab: MoE, 16 attention heads / 2 KV heads, ~35GB FP8 weights.
+# TP=4 fits (~8.75GB/GPU) and is valid despite kv_heads=2 via vLLM's KV-head
+# replication path (TP is a multiple of kv_heads, not just a divisor of it).
+tensor_parallel_size: 4
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+trust_remote_code: true
+# ~11MB/s measured on this cluster; 35GB raw ~53min, generous margin.
+startup_timeout_s: 9000

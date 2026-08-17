@@ -1,0 +1,12 @@
+engine: vllm
+model_id: aaditya/Llama3-OpenBioLLM-8B
+backend_api: openai_compatible
+# Biomedical fine-tune counterpart to llama3_8b_instruct.yaml. Same
+# architecture (32 attention heads / 8 KV heads, ~16GB BF16) and TP=2 sizing.
+tensor_parallel_size: 2
+# Same 8192 max_position_embeddings ceiling as llama3_8b_instruct.yaml.
+max_model_len: 8192
+gpu_memory_utilization: 0.90
+enforce_eager: false
+# Same basis as llama3_8b_instruct.yaml: ~11MB/s measured, 16GB, TP=2.
+startup_timeout_s: 5400

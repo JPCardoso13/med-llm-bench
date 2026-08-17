@@ -57,6 +57,20 @@ def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[
     tp = int(model_cfg.get("tensor_parallel_size", 1))
     max_model_len = int(model_cfg.get("max_model_len", 8192))
     gpu_mem_util = float(model_cfg.get("gpu_memory_utilization", 0.8))
+    # vLLM's own default (4GiB per TP rank) totals num_gpus x 4GiB against a
+    # single node's CPU RAM - on 16GB-GPU/31GB-RAM nodes that overshoots at
+    # TP>=8 (32GiB requested vs ~31GiB available). 2GiB/rank keeps the total
+    # comfortably under node RAM even at TP=8, while still giving KV-cache
+    # overflow a real buffer. Override per-model via swap_space_gb if needed.
+    swap_space_gb = float(model_cfg.get("swap_space_gb", 2))
+    # vLLM's default max_num_seqs=256 sizes its dummy-request sampler warmup
+    # pass accordingly, and that warmup's peak memory can exceed the
+    # steady-state weight+KV-cache budget even when gpu_memory_utilization
+    # looks fine on paper (observed: 7.11GiB weights + 5.03GiB KV cache should
+    # fit, but the 256-wide warmup batch OOM'd anyway). This project's
+    # SequentialRunner has no concurrency at all (one request at a time), so
+    # there's no real workload that needs a large value here.
+    max_num_seqs = int(model_cfg.get("max_num_seqs", 8))
 
     launcher = str(Path(__file__).parent / "vllm_launcher.py")
     cmd = [
@@ -76,6 +90,10 @@ def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[
         str(max_model_len),
         "--gpu-memory-utilization",
         str(gpu_mem_util),
+        "--swap-space",
+        str(swap_space_gb),
+        "--max-num-seqs",
+        str(max_num_seqs),
     ]
 
     if model_cfg.get("enforce_eager", True):

@@ -1,0 +1,13 @@
+engine: vllm
+model_id: Qwen/Qwen3.6-27B-FP8
+backend_api: openai_compatible
+# rtx4060/haslab: 24 attention heads / 4 KV heads, ~30.9GB FP8 weights - TP=2
+# would put ~15.45GB/GPU on a 16GB card (no room for KV cache); TP=4 is the
+# smallest valid split (both head counts divide evenly) that actually fits.
+tensor_parallel_size: 4
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+trust_remote_code: true
+# ~11MB/s measured on this cluster; 30.9GB raw ~47min, generous margin.
+startup_timeout_s: 9000

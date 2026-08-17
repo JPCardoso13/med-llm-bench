@@ -77,8 +77,16 @@ declare -a TELEMETRY_PIDS=()
 cleanup() {
     rc=$?
     if [[ "$HF_CACHE_MODE" == "ephemeral" ]]; then
-        echo "Cleaning ephemeral Hugging Face cache at $HF_HOME"
-        rm -rf "$HF_HOME" >/dev/null 2>&1 || true
+        # HF_HOME is node-local (see SLURM_TMPDIR note in slurm_orchestrator.sh)
+        # - each node in a multi-node run independently downloads into its own
+        # copy, so cleanup must sweep every allocated node, not just wherever
+        # this batch script itself happens to be running. A plain local rm -rf
+        # here only ever cleaned the driver's node, silently leaving every
+        # other node's downloaded weights to accumulate release over release.
+        echo "Cleaning ephemeral Hugging Face cache on all ${#nodes_array[@]} allocated node(s): $HF_HOME"
+        for node in "${nodes_array[@]}"; do
+            timeout 30 srun --overlap --nodes=1 --ntasks=1 -w "$node" rm -rf "$HF_HOME" >/dev/null 2>&1 || true
+        done
     fi
     if [[ ${#TELEMETRY_PIDS[@]} -gt 0 ]]; then
         echo "Stopping telemetry processes..."
@@ -114,8 +122,17 @@ if [[ "$multi_node" -eq 1 ]]; then
     head_node="${nodes_array[0]}"
     head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" /bin/hostname --ip-address | awk '{print $1}')
 
-    export SINGULARITYENV_VLLM_HOST_IP="$head_node_ip"
-    export SINGULARITYENV_LLM_BASE_URL="http://${head_node_ip}:${SERVE_PORT}/v1"
+    # VLLM_HOST_IP/LLM_BASE_URL are set per-node inline in each ray-start
+    # srun's own --export below, not exported here as plain shell vars -
+    # singularity_exports starts with "ALL,", so a plain export here would
+    # leak the head node's IP into every *other* srun call too (the
+    # orchestrator, the judge). vLLM reads VLLM_HOST_IP internally to self-
+    # report each Ray actor's node identity for its distributed executor;
+    # every actor inheriting the same fixed head-node IP from the driver's
+    # environment (Ray actors inherit the driver's env, not their physical
+    # node's) is what caused "Every node should have a unique IP address...
+    # 1 unique IP address" on every tensor_parallel_size>1 model - not a
+    # per-model bug, this one line broke every multi-GPU model uniformly.
 
     # Start Ray head
     srun --overlap --nodes=1 --ntasks=1 -w "$head_node" --export="${singularity_exports},SINGULARITYENV_CUDA_VISIBLE_DEVICES=0,SINGULARITYENV_VLLM_HOST_IP=$head_node_ip,SINGULARITYENV_LLM_BASE_URL=http://${head_node_ip}:${SERVE_PORT}/v1" \

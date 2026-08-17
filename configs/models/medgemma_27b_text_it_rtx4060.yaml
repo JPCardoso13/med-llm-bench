@@ -1,0 +1,13 @@
+engine: vllm
+model_id: google/medgemma-27b-text-it
+backend_api: openai_compatible
+# Text-only variant (distinct from medgemma_27b_it.yaml's multimodal
+# google/medgemma-27b-it, sized for Deucalion). Confirmed same text backbone
+# as gemma-3-27b-it (32 attention heads / 16 KV heads) via HF config.json.
+# Same TP=8 rationale as gemma3_27b_it_rtx4060.yaml.
+tensor_parallel_size: 8
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+# Same basis as gemma3_27b_it_rtx4060.yaml: ~11MB/s measured, 54GB, TP=8.
+startup_timeout_s: 14400

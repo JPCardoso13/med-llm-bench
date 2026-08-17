@@ -1,0 +1,14 @@
+engine: vllm
+model_id: openai/gpt-oss-20b
+backend_api: openai_compatible
+# Primary judge candidate for rtx4060/haslab - distinct from
+# gpt_oss_120b_judge.yaml (too large for this hardware). 64 attention heads /
+# 8 KV heads, ~12.8GB MXFP4 weights - TP=1 would leave only ~1.6GB/GPU
+# headroom; TP=2 (~6.4GB/GPU) gives a safer margin for a judge that runs
+# across every free-text sample in the benchmark.
+tensor_parallel_size: 2
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+# ~11MB/s measured on this cluster; 12.8GB raw ~19min, generous margin.
+startup_timeout_s: 5400

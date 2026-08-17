@@ -1,0 +1,14 @@
+engine: vllm
+model_id: QuantTrio/Qwen3.6-35B-A3B-AWQ
+backend_api: openai_compatible
+# Distinct from qwen3_6_35b_a3b_awq_4bit.yaml (cyankiwi's AWQ build, sized
+# for Deucalion) - this is QuantTrio's AWQ build, sized for rtx4060/haslab.
+# ~22GB AWQ weights would fit at TP=2 (~11GB/GPU, ~3.4GB headroom) but TP=4
+# (~5.5GB/GPU) is used for a safer KV-cache margin, matching its FP8 sibling.
+tensor_parallel_size: 4
+max_model_len: 16384
+gpu_memory_utilization: 0.90
+enforce_eager: false
+trust_remote_code: true
+# ~11MB/s measured on this cluster; 22GB raw ~33min, generous margin.
+startup_timeout_s: 7200
