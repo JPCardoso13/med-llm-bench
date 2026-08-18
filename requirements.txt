@@ -1,11 +1,16 @@
-vllm==0.15.1
+vllm==0.17.0
 accelerate
 requests
 pydantic
 datasets
 jinja2
 rouge-score>=0.1.2
-openai==2.45.0
+# vllm==0.17.0 requires openai>=1.99.1,<2.25.0 (was 2.45.0, outside that
+# range - would fail dependency resolution). Pinned to the exact version
+# validated against this vllm/torch pair; our own usage (OpenAIBackend,
+# JudgeClient) only touches the client constructor and chat.completions.create,
+# stable across this range.
+openai==2.24.0
 pyyaml==6.0.3
 tqdm==4.68.4
 pandas==2.3.3

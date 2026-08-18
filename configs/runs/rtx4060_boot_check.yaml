@@ -1,16 +1,15 @@
 # Temporary subset of rtx4060_production.yaml for boot-check purposes only -
-# excludes the 4 Qwen3.6 configs, which are blocked by this cluster's vllm
-# (0.15.1) / transformers (4.57.6) not recognizing the qwen3_5/qwen3_5_moe
-# architecture at all. Once that's resolved (vllm/transformers upgrade, a
-# substitute model, or a rebuilt .sif), go back to rtx4060_production.yaml
-# and retire this file - it's not a second permanent roster.
+# excludes the 4 Qwen3.6 configs (blocked: this cluster's vllm 0.15.1 /
+# transformers 4.57.6 don't recognize the qwen3_5/qwen3_5_moe architecture at
+# all) and the TP=8 pair (gemma3/medgemma - dropped for now, see
+# rtx4060_production.yaml's comment). Once both are resolved, go back to
+# rtx4060_production.yaml and retire this file - it's not a second
+# permanent roster.
 tasks:
   - cdkr
   - oecr
   - src
 
 models:
-  - gemma3_27b_it_rtx4060
-  - medgemma_27b_text_it_rtx4060
   - llama3_8b_instruct
   - llama3_openbiollm_8b

@@ -9,6 +9,13 @@ backend_api: openai_compatible
 tensor_parallel_size: 2
 max_model_len: 16384
 gpu_memory_utilization: 0.90
-enforce_eager: false
+# CUDA graph capture (enforce_eager: false) OOM'd during
+# compile_or_warm_up_model on 2026-08-18 despite healthy KV-cache headroom
+# (6.75GiB free) - a separate memory spike from the dummy-sampler warmup
+# max_num_seqs already fixes. SequentialRunner has zero real concurrency, so
+# there's no throughput reason to want CUDA graphs here; disabling them
+# trades a bit of per-token speed for reliability, which is the right trade
+# for a judge that only needs to get through the run once.
+enforce_eager: true
 # ~11MB/s measured on this cluster; 12.8GB raw ~19min, generous margin.
 startup_timeout_s: 5400

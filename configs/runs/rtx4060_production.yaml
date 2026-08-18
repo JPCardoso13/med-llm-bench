@@ -2,6 +2,13 @@
 # a distinct model roster from full_production.yaml (sized for Deucalion's
 # 4x80GB A100s), chosen to preserve the same evaluation axes (dense vs MoE,
 # fine-tuned vs base at two size tiers) at hardware the models actually fit.
+#
+# gemma3_27b_it_rtx4060 / medgemma_27b_text_it_rtx4060 (TP=8) are dropped for
+# now, not removed - real config files still exist. Both burned their full
+# 4h startup_timeout_s on 2026-08-18 still mid-download (8 simultaneous
+# per-node downloads at this cluster's ~11MB/s bandwidth don't reliably
+# finish even in 4h). Re-add once there's a real fix (download-once-fan-out
+# internally, or similar) rather than just bumping the timeout further.
 tasks:
   - cdkr
   - oecr
@@ -12,7 +19,5 @@ models:
   - qwen3_6_27b_awq_quanttrio
   - qwen3_6_35b_a3b_fp8
   - qwen3_6_35b_a3b_awq_quanttrio
-  - gemma3_27b_it_rtx4060
-  - medgemma_27b_text_it_rtx4060
   - llama3_8b_instruct
   - llama3_openbiollm_8b

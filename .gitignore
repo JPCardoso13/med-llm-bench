@@ -18,3 +18,7 @@ outputs/
 *.egg-info/
 
 /med-llm-bench_sandbox
+
+# Scratch location for testing a vllm/torch upgrade (Qwen3.6 support) -
+# temporary, deleted once the upgrade is either adopted properly or dropped.
+/.vllm_upgrade_test

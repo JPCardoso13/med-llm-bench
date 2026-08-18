@@ -4,6 +4,13 @@ backend_api: openai_compatible
 # Biomedical fine-tune counterpart to llama3_8b_instruct.yaml. Same
 # architecture (32 attention heads / 8 KV heads, ~16GB BF16) and TP=2 sizing.
 tensor_parallel_size: 2
+# This tokenizer ships no chat_template at all (confirmed via its
+# tokenizer_config.json) - vLLM/transformers >=4.44 refuse to fall back to an
+# implicit default, so serving fails outright without one. The model's own
+# README explicitly says to use "the exact chat template provided by Llama-3
+# instruct version" since it's a fine-tune of that model - not a workaround,
+# the documented correct approach.
+chat_template: configs/chat_templates/llama3_instruct.jinja
 # Same 8192 max_position_embeddings ceiling as llama3_8b_instruct.yaml.
 max_model_len: 8192
 gpu_memory_utilization: 0.90

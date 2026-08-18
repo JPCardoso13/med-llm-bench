@@ -96,6 +96,14 @@ def _build_cmd(model_cfg: Dict[str, Any], port: int, distributed: bool) -> list[
         str(max_num_seqs),
     ]
 
+    chat_template = model_cfg.get("chat_template")
+    if chat_template:
+        # vLLM's --chat-template accepts either a file path or a literal
+        # template string. Repo-relative paths (matching every other config
+        # reference in this codebase, e.g. orchestrator.py's TASKS_DIR)
+        # resolve fine as-is since the process cwd is always the repo root.
+        cmd.extend(["--chat-template", chat_template])
+
     if model_cfg.get("enforce_eager", True):
         cmd.append("--enforce-eager")
 
