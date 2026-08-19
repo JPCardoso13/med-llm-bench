@@ -8,12 +8,12 @@ datasets:
   - name: medqa
     config: configs/datasets/medqa.yaml
     enabled: true
-    eval_limit: 50
+    eval_limit: null
 
   - name: medxpertqa
     config: configs/datasets/medxpertqa.yaml
     enabled: true
-    eval_limit: 50
+    eval_limit: null
 
   - name: medcasemcq
     config: configs/datasets/medcasemcq.yaml

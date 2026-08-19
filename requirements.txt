@@ -5,6 +5,7 @@ pydantic
 datasets
 jinja2
 rouge-score>=0.1.2
+bert-score>=0.3.13
 # vllm==0.17.0 requires openai>=1.99.1,<2.25.0 (was 2.45.0, outside that
 # range - would fail dependency resolution). Pinned to the exact version
 # validated against this vllm/torch pair; our own usage (OpenAIBackend,

@@ -28,10 +28,20 @@ from llm_bench.utils.io import save_results_json
 TASKS_DIR = Path("configs/tasks")
 MODELS_DIR = Path("configs/models")
 PER_DATASET_EVAL_LIMIT = 5
-RAW_RESULTS_DIR = Path("outputs/raw")
-REPORTS_DIR = Path("outputs/reports")
-TMP_RESULTS_DIR = Path("outputs/tmp")
-SERVE_LOG_DIR = Path("logs/vllm")
+
+# Namespaces outputs/logs per run (defaults to the SLURM job ID, matching
+# run_pipeline.sh's existing "${SLURM_JOB_ID:-manual}" convention for the
+# ephemeral HF cache dir) so two runs never read or write each other's
+# results - previously all runs shared one flat outputs/ tree keyed only by
+# task/model name, which is what let the judge pass silently re-process
+# stale results from unrelated past runs and burn a boot-check's time budget
+# on 2026-08-18/19.
+RUN_ID = os.getenv("RUN_ID", "manual")
+OUTPUTS_DIR = Path("outputs") / RUN_ID
+RAW_RESULTS_DIR = OUTPUTS_DIR / "raw"
+REPORTS_DIR = OUTPUTS_DIR / "reports"
+TMP_RESULTS_DIR = OUTPUTS_DIR / "tmp"
+SERVE_LOG_DIR = Path("logs/vllm") / RUN_ID
 
 
 def maybe_evict_hf_cache_between_models() -> None:
@@ -250,11 +260,19 @@ def run_benchmark_for_model(
             loader = YamlLoader(dataset_config_path)
             data = loader.load()
 
-            eval_limit = ds.get("eval_limit")
-            if eval_limit is None:
+            # A missing eval_limit key falls back to the small
+            # PER_DATASET_EVAL_LIMIT safety default (guards against an
+            # accidentally-uncapped run from a forgotten field); an
+            # explicit `eval_limit: null` means no cap at all - use
+            # whatever the dataset config's own eval split provides.
+            if "eval_limit" in ds:
+                eval_limit = ds["eval_limit"]
+            else:
                 eval_limit = PER_DATASET_EVAL_LIMIT
 
-            eval_samples = data.get("eval", [])[: int(eval_limit)]
+            eval_samples = data.get("eval", [])
+            if eval_limit is not None:
+                eval_samples = eval_samples[: int(eval_limit)]
             fewshot_samples = data.get("fewshot", [])
 
             # Per-dataset override for the generation length budget, since

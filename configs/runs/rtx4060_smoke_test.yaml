@@ -1,0 +1,11 @@
+# Minimal, fast run for verifying pipeline plumbing (e.g. output
+# namespacing) - not for gathering real benchmark data. Uses small,
+# single-GPU models and a small eval_limit (see cdkr.yaml/oecr.yaml,
+# temporarily lowered for this purpose and restored after).
+tasks:
+  - cdkr
+  - oecr
+
+models:
+  - gemma_3_1b_it
+  - granite_3_1_2b_instruct

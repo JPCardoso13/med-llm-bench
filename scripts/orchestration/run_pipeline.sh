@@ -24,6 +24,11 @@ cd "$WORKDIR"
 
 export SIF="med-llm-bench.sif"
 
+# Namespaces outputs/ and logs/vllm/ per run (orchestrator.py, llm_judge_run.py
+# default to the same fallback if RUN_ID isn't in their environment) so two
+# runs never mix or overwrite each other's results.
+RUN_ID="${SLURM_JOB_ID:-manual}"
+
 HF_CACHE_MODE="${HF_CACHE_MODE:-persistent}"
 if [[ "$HF_CACHE_MODE" == "ephemeral" ]]; then
     job_tmp_root="${SLURM_TMPDIR:-$WORKDIR/tmp/slurm_${SLURM_JOB_ID:-manual}}"
@@ -111,9 +116,19 @@ mkdir -p configs/runtime
 # leading "ALL," plus every SINGULARITYENV_* pair here) - so these values
 # only need to exist in this one string, not as separately exported shell
 # variables too.
-singularity_exports="ALL,SINGULARITYENV_HF_HOME=$HF_HOME,SINGULARITYENV_HUGGINGFACE_HUB_CACHE=$HF_HOME/hub,SINGULARITYENV_HF_HUB_OFFLINE=$HF_HUB_OFFLINE,SINGULARITYENV_TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE,SINGULARITYENV_HF_DATASETS_OFFLINE=$HF_DATASETS_OFFLINE,SINGULARITYENV_HF_OFFLINE=$HF_OFFLINE,SINGULARITYENV_HF_EVICT_BETWEEN_MODELS=$HF_EVICT_BETWEEN_MODELS,SINGULARITYENV_PYTORCH_ALLOC_CONF=expandable_segments:True,SINGULARITYENV_PYTHONPATH=$WORKDIR${PYTHONPATH:+:$PYTHONPATH},SINGULARITYENV_LLM_API_KEY=${LLM_API_KEY:-EMPTY},SINGULARITYENV_LLM_NODE_COUNT=$node_count,SINGULARITYENV_SERVE_PORT=$SERVE_PORT,SINGULARITYENV_RUN_CONFIG=$RUN_CONFIG"
+# PYTHONUSERBASE: stopgap for packages added to requirements.txt after the
+# current .sif was built (currently just bert-score, pip-installed into
+# .container_overlay/ - see .gitignore) - harmless no-op once that directory
+# doesn't exist (e.g. after the next rebuild bakes it in properly and this
+# gets cleaned up).
+singularity_exports="ALL,SINGULARITYENV_HF_HOME=$HF_HOME,SINGULARITYENV_HUGGINGFACE_HUB_CACHE=$HF_HOME/hub,SINGULARITYENV_HF_HUB_OFFLINE=$HF_HUB_OFFLINE,SINGULARITYENV_TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE,SINGULARITYENV_HF_DATASETS_OFFLINE=$HF_DATASETS_OFFLINE,SINGULARITYENV_HF_OFFLINE=$HF_OFFLINE,SINGULARITYENV_HF_EVICT_BETWEEN_MODELS=$HF_EVICT_BETWEEN_MODELS,SINGULARITYENV_PYTORCH_ALLOC_CONF=expandable_segments:True,SINGULARITYENV_PYTHONPATH=$WORKDIR${PYTHONPATH:+:$PYTHONPATH},SINGULARITYENV_PYTHONUSERBASE=$WORKDIR/.container_overlay,SINGULARITYENV_LLM_API_KEY=${LLM_API_KEY:-EMPTY},SINGULARITYENV_LLM_NODE_COUNT=$node_count,SINGULARITYENV_SERVE_PORT=$SERVE_PORT,SINGULARITYENV_RUN_CONFIG=$RUN_CONFIG,SINGULARITYENV_RUN_ID=$RUN_ID"
 
-mkdir -p logs/orchestration/out logs/orchestration/err logs/vllm outputs/reports outputs/raw outputs/judged
+# outputs/<RUN_ID>/{raw,reports,judged} and logs/vllm/<RUN_ID> are created
+# on demand by orchestrator.py/llm_judge_run.py/vllm_manager.py themselves
+# (all mkdir(parents=True) before their first write) - only the two SLURM
+# --output/--error targets below need to exist ahead of time, since SLURM
+# opens those itself before run_pipeline.sh's own code ever runs.
+mkdir -p logs/orchestration/out logs/orchestration/err
 
 echo "Job $SLURM_JOB_ID on node $(hostname), nodes=${node_count}, gpus_per_node=${gpus_per_node}"
 
@@ -237,7 +252,8 @@ if [[ "$ORCHESTRATOR_EXIT_CODE" -eq 0 ]]; then
     srun --overlap --nodes=1 --ntasks=1 \
         --export="${singularity_exports}" \
         "$SINGULARITY_BIN" exec --nv --env-file .env "$SIF" \
-        python3 -u scripts/analysis/generate_report.py || REPORT_EXIT_CODE=$?
+        python3 -u scripts/analysis/generate_report.py \
+        --reports-dir "outputs/$RUN_ID/reports" --out-dir "outputs/$RUN_ID/analysis" || REPORT_EXIT_CODE=$?
     echo "Report generation exited with code: $REPORT_EXIT_CODE"
 else
     echo "Skipping report generation: orchestrator did not exit cleanly"

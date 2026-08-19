@@ -12,6 +12,7 @@ from scripts.vllm.vllm_manager import start_vllm, stop_vllm
 from scripts.orchestration.orchestrator import (
     RAW_RESULTS_DIR,
     REPORTS_DIR,
+    RUN_ID,
     SERVE_LOG_DIR,
     discover_task_configs,
     load_dotenv,
@@ -22,7 +23,7 @@ from llm_bench.judge import JudgeClient, build_judge_messages, build_judge_respo
 from llm_bench.metrics import summarize_judge_group, summarize_judge_agreement
 from llm_bench.schemas import BenchmarkResult
 
-JUDGED_RESULTS_DIR = Path("outputs/judged")
+JUDGED_RESULTS_DIR = Path("outputs") / RUN_ID / "judged"
 
 
 def parse_args() -> argparse.Namespace:

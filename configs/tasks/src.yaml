@@ -8,12 +8,12 @@ datasets:
   - name: pubmedsum
     config: configs/datasets/pubmedsum.yaml
     enabled: true
-    eval_limit: 50
+    eval_limit: null
 
   - name: multiclinsum
     config: configs/datasets/multiclinsum.yaml
     enabled: true
-    eval_limit: 50
+    eval_limit: null
 
 execution:
   num_fewshot: 0

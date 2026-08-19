@@ -7,6 +7,7 @@ from llm_bench.reporting import (
     load_headline_metrics,
     load_group_by_metrics,
     load_judge_distributions,
+    load_judge_agreement,
     load_systems_metrics,
     load_reliability_metrics,
     load_qualitative_examples,
@@ -131,6 +132,55 @@ def build_judge(judge_df, out_dir: Path) -> None:
     print(f"  judge/ done ({len(keys)} rubric items)")
 
 
+def build_systems(systems_df, out_dir: Path) -> None:
+    """Standalone systems charts/tables - previously the only place systems
+    data reached a chart was as one of the two tradeoff-scatter axes; every
+    other field (TTFT, throughput, latency CoV) was computed into
+    systems_summary.json and never visualized anywhere. Charts every
+    metric_name load_systems_metrics actually found, not a fixed list, so
+    e.g. adding a new systems.yaml latency field surfaces here automatically.
+    """
+    if systems_df.empty:
+        print("  systems/ skipped (no data)")
+        return
+
+    count = 0
+    for (task_id, dataset), _ in systems_df.groupby(["task_id", "dataset"]):
+        cat_dir = _task_dir(out_dir, task_id, "systems")
+        metric_names = list(systems_df[(systems_df["task_id"] == task_id) & (systems_df["dataset"] == dataset)]["metric_name"].unique())
+        for metric_name in metric_names:
+            plot_headline_bar_chart(systems_df, task_id, dataset, metric_name, cat_dir / f"{dataset}_{metric_name}.png")
+            count += 1
+        table = pivot_headline_table(systems_df, task_id, dataset)
+        if not table.empty:
+            save_table(table, cat_dir, f"{dataset}_systems", caption=f"{task_id}/{dataset}: systems metrics per model")
+    print(f"  systems/ done ({count} charts)")
+
+
+def build_judge_agreement(judge_agreement_df, out_dir: Path) -> None:
+    """Does each automatic metric actually track the judge's verdict -
+    computed by summarize_judge_agreement since early in this project but
+    never reachable by any chart/table until now."""
+    if judge_agreement_df.empty:
+        print("  judge_agreement/ skipped (no data - no judge pass run yet, or CDKR which has no judge by design)")
+        return
+
+    count = 0
+    for (task_id, dataset), _ in judge_agreement_df.groupby(["task_id", "dataset"]):
+        cat_dir = _task_dir(out_dir, task_id, "judge_agreement")
+        metric_names = list(judge_agreement_df[(judge_agreement_df["task_id"] == task_id) & (judge_agreement_df["dataset"] == dataset)]["metric_name"].unique())
+        for metric_name in metric_names:
+            plot_headline_bar_chart(
+                judge_agreement_df, task_id, dataset, metric_name, cat_dir / f"{dataset}_{metric_name}.png",
+                title=f"{task_id}/{dataset} - {metric_name} (Spearman vs. judge)",
+            )
+            count += 1
+        table = pivot_headline_table(judge_agreement_df, task_id, dataset)
+        if not table.empty:
+            save_table(table, cat_dir, f"{dataset}_judge_agreement", caption=f"{task_id}/{dataset}: judge-vs-automatic-metric agreement (Spearman)")
+    print(f"  judge_agreement/ done ({count} charts)")
+
+
 def build_tradeoffs(systems_df, headline_df, out_dir: Path) -> None:
     count = 0
     for (task_id, dataset), _ in headline_df.groupby(["task_id", "dataset"]):
@@ -209,24 +259,27 @@ def main() -> None:
 
     group_df = load_group_by_metrics(reports_dir)
     judge_df = load_judge_distributions(reports_dir)
+    judge_agreement_df = load_judge_agreement(reports_dir)
     systems_df = load_systems_metrics(reports_dir)
     reliability_df = load_reliability_metrics(reports_dir, judge_flag_rates=JUDGE_FLAG_RATES)
     examples_df = load_qualitative_examples(reports_dir)
     label_bias_df = load_label_bias(reports_dir)
 
     print(f"Loaded {len(headline_df)} headline / {len(group_df)} group_by / {len(judge_df)} judge / "
-          f"{len(systems_df)} systems / {len(reliability_df)} reliability / {len(label_bias_df)} label_bias rows, "
-          f"{len(examples_df)} example previews.")
+          f"{len(judge_agreement_df)} judge_agreement / {len(systems_df)} systems / {len(reliability_df)} reliability / "
+          f"{len(label_bias_df)} label_bias rows, {len(examples_df)} example previews.")
 
     build_comparison(headline_df, out_dir)
     build_subgroups(group_df, out_dir)
     build_judge(judge_df, out_dir)
+    build_judge_agreement(judge_agreement_df, out_dir)
+    build_systems(systems_df, out_dir)
     build_tradeoffs(systems_df, headline_df, out_dir)
     build_reliability(reliability_df, out_dir)
     build_label_bias(label_bias_df, out_dir)
     build_examples(examples_df, out_dir)
 
-    print(f"\nDone. Output under {out_dir}/<task_id>/<comparison|subgroups|judge|tradeoffs|reliability|bias|examples>/")
+    print(f"\nDone. Output under {out_dir}/<task_id>/<comparison|subgroups|judge|judge_agreement|systems|tradeoffs|reliability|bias|examples>/")
 
 
 if __name__ == "__main__":

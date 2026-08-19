@@ -25,6 +25,36 @@ def _extract_scalar(node: dict[str, Any], key: str) -> float | None:
     return None
 
 
+def _extract_answer_metrics(answer_metrics: dict[str, Any]) -> dict[str, float]:
+    """Generic extraction from an "answer" target's similarity-metrics
+    sub-dict - {metric_name: score_or_{variant: score}} - shared by both mcq
+    and generative profiles (cognitive_calculator.py wires the same
+    similarity.metrics mechanism into both). Iterates whatever's actually
+    present instead of a hardcoded metric-name list (previously just
+    token_f1/rouge - exact_match was silently never extracted here despite
+    being configurable), so a newly configured metric like bertscore surfaces
+    without a matching update in this file.
+
+    A multi-valued metric's node is all-dict-valued (rouge: {"rouge1": {...},
+    ...}; bertscore: {"precision": {...}, ...}); flattens to bare variant
+    keys, same convention rouge already used - fine as long as two
+    multi-valued metrics configured on the same target don't share a variant
+    name (rouge's rougeN names and bertscore's precision/recall/f1 don't).
+    """
+    out: dict[str, float] = {}
+    for metric_name, metric_node in answer_metrics.items():
+        if isinstance(metric_node, dict) and metric_node and all(isinstance(v, dict) for v in metric_node.values()):
+            for variant_key, variant_node in metric_node.items():
+                value = _extract_scalar(variant_node, variant_key)
+                if value is not None:
+                    out[variant_key] = value
+        else:
+            value = _extract_scalar(metric_node, metric_name)
+            if value is not None:
+                out[metric_name] = value
+    return out
+
+
 def _extract_core_metrics(mcq: dict[str, Any] | None, generative_metrics: dict[str, Any] | None) -> dict[str, float]:
     """Shared extraction from an already-located mcq dict and/or generative metrics dict."""
     out: dict[str, float] = {}
@@ -34,16 +64,10 @@ def _extract_core_metrics(mcq: dict[str, Any] | None, generative_metrics: dict[s
             value = _extract_scalar(mcq.get(key, {}), key)
             if value is not None:
                 out[key] = value
+        out.update(_extract_answer_metrics(mcq.get("answer", {})))
 
     if generative_metrics:
-        answer_metrics = generative_metrics.get("answer", {})
-        token_f1 = _extract_scalar(answer_metrics.get("token_f1", {}), "token_f1")
-        if token_f1 is not None:
-            out["token_f1"] = token_f1
-        for rouge_key, rouge_node in answer_metrics.get("rouge", {}).items():
-            value = _extract_scalar(rouge_node, rouge_key)
-            if value is not None:
-                out[rouge_key] = value
+        out.update(_extract_answer_metrics(generative_metrics.get("answer", {})))
         compression_ratio = _extract_scalar(generative_metrics.get("compression_ratio", {}), "compression_ratio")
         if compression_ratio is not None:
             out["compression_ratio"] = compression_ratio
@@ -212,14 +236,64 @@ def load_judge_distributions(reports_dir: str | Path = "outputs/reports") -> pd.
     )
 
 
+def load_judge_agreement(reports_dir: str | Path = "outputs/reports") -> pd.DataFrame:
+    """One row per (task, model, dataset, metric_name, value) - Spearman
+    correlation between one rubric item's judge verdict and one automatic
+    metric's per-sample score (cognitive_calculator.py::summarize_judge_agreement,
+    written into cognitive_summary.json's llm_judge.agreement block by
+    llm_judge_run.py). Answers "does this automatic metric actually track
+    what the judge says" - previously computed but never surfaced anywhere.
+
+    metric_name is "<rubric_item>_<automatic_metric>" (e.g.
+    "diagnosis_correctness_token_f1") so this can reuse
+    plot_headline_bar_chart/plot_grouped_metric_bar_chart/pivot_headline_table
+    directly - same (task_id, model_name, dataset, metric_name, value) shape
+    as load_headline_metrics, not a new chart/table shape to build.
+    """
+    rows: list[dict[str, Any]] = []
+    reports_dir = Path(reports_dir)
+
+    for task_dir in sorted(reports_dir.glob("*")):
+        if not task_dir.is_dir():
+            continue
+        task_id = task_dir.name
+
+        for model_dir in sorted(task_dir.glob("*")):
+            summary_path = model_dir / "cognitive_summary.json"
+            if not summary_path.exists():
+                continue
+            model_name = model_dir.name
+
+            data = json.loads(summary_path.read_text())
+            for group in data.get("groups", []):
+                dataset = group["dataset"]
+                agreement = group["metrics"].get("llm_judge", {}).get("agreement", {})
+                for rubric_item, item_agreement in agreement.items():
+                    for metric_name, stats in item_agreement.items():
+                        spearman = stats.get("spearman")
+                        if spearman is not None:
+                            rows.append({
+                                "task_id": task_id,
+                                "model_name": model_name,
+                                "dataset": dataset,
+                                "metric_name": f"{rubric_item}_{metric_name}",
+                                "value": spearman,
+                            })
+
+    return pd.DataFrame(rows, columns=["task_id", "model_name", "dataset", "metric_name", "value"])
+
+
 def load_systems_metrics(reports_dir: str | Path = "outputs/reports") -> pd.DataFrame:
     """One row per (task, model, dataset, metric_name) from systems_summary.json.
 
-    Pulls latency (mean, p99 - the tail, not just the average, since a model
-    that's fast on average but has a long tail is a different risk profile
-    than a consistently fast one - and cov, mean/std's ratio) and throughput
-    means. The full systems_summary.json also has p50/p90/p95 and telemetry
-    that aren't needed for the tradeoffs/ charts yet.
+    Pulls every field under `latency:` (mean, p99 - the tail, not just the
+    average, since a model that's fast on average but has a long tail is a
+    different risk profile than a consistently fast one - and cov, mean/std's
+    ratio) - whatever fields configs/metrics/systems.yaml's latency.fields
+    lists (today: total_latency_ms, ttft_ms), not a hardcoded pair - and
+    throughput means. The full systems_summary.json also has p50/p90/p95,
+    inter_token_latency, usage (token counts), generation (perplexity), and
+    telemetry (GPU util/memory) that aren't pulled here yet.
     """
     rows: list[dict[str, Any]] = []
     reports_dir = Path(reports_dir)
@@ -240,23 +314,24 @@ def load_systems_metrics(reports_dir: str | Path = "outputs/reports") -> pd.Data
                 dataset = group["dataset"]
                 metrics = group.get("metrics", {})
 
-                total_latency = metrics.get("latency", {}).get("total_latency_ms", {})
-                if total_latency.get("mean") is not None:
-                    rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
-                                  "metric_name": "total_latency_ms", "value": total_latency["mean"]})
-                if total_latency.get("p99") is not None:
-                    rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
-                                  "metric_name": "total_latency_ms_p99", "value": total_latency["p99"]})
-                # Coefficient of variation (std/mean) - a scale-free measure of how
-                # spread out latency is, so a slow-but-consistent model and a
-                # fast-but-erratic one don't look the same just because their means
-                # happen to be close. Derived here from mean+std already computed
-                # by the calculator, not a new calculator metric.
-                mean = total_latency.get("mean")
-                std = total_latency.get("std")
-                if mean is not None and std is not None and mean > 0:
-                    rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
-                                  "metric_name": "total_latency_ms_cov", "value": std / mean})
+                for latency_field, latency_node in metrics.get("latency", {}).items():
+                    if latency_node.get("mean") is not None:
+                        rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
+                                      "metric_name": latency_field, "value": latency_node["mean"]})
+                    if latency_node.get("p99") is not None:
+                        rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
+                                      "metric_name": f"{latency_field}_p99", "value": latency_node["p99"]})
+                    # Coefficient of variation (std/mean) - a scale-free measure of
+                    # how spread out a latency field is, so a slow-but-consistent
+                    # model and a fast-but-erratic one don't look the same just
+                    # because their means happen to be close. Derived here from
+                    # mean+std already computed by the calculator, not a new
+                    # calculator metric.
+                    mean = latency_node.get("mean")
+                    std = latency_node.get("std")
+                    if mean is not None and std is not None and mean > 0:
+                        rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
+                                      "metric_name": f"{latency_field}_cov", "value": std / mean})
 
                 for throughput_name, throughput_node in metrics.get("throughput", {}).items():
                     mean = throughput_node.get("mean")

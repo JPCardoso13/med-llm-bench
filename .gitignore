@@ -19,6 +19,8 @@ outputs/
 
 /med-llm-bench_sandbox
 
-# Scratch location for testing a vllm/torch upgrade (Qwen3.6 support) -
-# temporary, deleted once the upgrade is either adopted properly or dropped.
-/.vllm_upgrade_test
+# Packages pip-installed here (via PYTHONUSERBASE) as a stopgap between
+# requirements.txt gaining a new dependency and the next container rebuild
+# actually baking it in - e.g. bert-score, added for BERTScore support.
+# Delete once the corresponding rebuild lands; not meant to be permanent.
+/.container_overlay

@@ -50,6 +50,24 @@ similarity:
       lowercase: true
       normalize_whitespace: true
       strip_punctuation: true
+    - name: bertscore
+      target: answer
+      enabled: true
+      # CPU-forced: compute_and_save_metrics runs before stop_vllm, while
+      # the benchmarked model's vLLM server still holds most of the GPU
+      # (confirmed via a real CUDA OOM on a 16GB card with ~15.5GB already
+      # reserved by vLLM). Revisit once/if metrics computation moves to
+      # after stop_vllm - see orchestrator.py's run_single_model.
+      device: cpu
+    - name: bertscore
+      target: ref_reasoning
+      enabled: true
+      # CPU-forced: compute_and_save_metrics runs before stop_vllm, while
+      # the benchmarked model's vLLM server still holds most of the GPU
+      # (confirmed via a real CUDA OOM on a 16GB card with ~15.5GB already
+      # reserved by vLLM). Revisit once/if metrics computation moves to
+      # after stop_vllm - see orchestrator.py's run_single_model.
+      device: cpu
 
 llm_judge:
   enabled: true

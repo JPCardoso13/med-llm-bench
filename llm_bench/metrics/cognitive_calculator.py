@@ -208,28 +208,135 @@ def _build_group_by_breakdown(
     return breakdown
 
 
-def _build_similarity_scorer(metric_cfg: Mapping[str, Any]):
-    """Returns a (predicted, reference) -> score function for one similarity.metrics entry.
+def _build_similarity_scorer(metric_cfg: Mapping[str, Any]) -> tuple[Any, bool]:
+    """Returns ((predicted, reference) -> score, is_multi_valued) for one similarity.metrics entry.
 
-    exact_match/token_f1 return a float; rouge returns {variant: float} - the
-    caller routes each shape into its own aggregation bucket.
+    is_multi_valued is decided once, here, by whichever branch actually builds
+    the scorer - not re-derived from the metric name a second time at the call
+    site - so a new multi-valued metric (like bertscore's precision/recall/f1)
+    only needs to say so in its own branch. False means the scorer returns a
+    plain float (exact_match, token_f1); True means it returns a
+    {variant: float} dict (rouge; bertscore).
     """
     name = metric_cfg.get("name")
     if name == "exact_match":
-        return lambda predicted, reference: (
-            1.0 if _normalize_text(predicted, metric_cfg) == _normalize_text(reference, metric_cfg) else 0.0
+        return (
+            lambda predicted, reference: (
+                1.0 if _normalize_text(predicted, metric_cfg) == _normalize_text(reference, metric_cfg) else 0.0
+            ),
+            False,
         )
     if name == "token_f1":
-        return lambda predicted, reference: _token_f1_score(
-            _normalize_text(predicted, metric_cfg), _normalize_text(reference, metric_cfg)
+        return (
+            lambda predicted, reference: _token_f1_score(
+                _normalize_text(predicted, metric_cfg), _normalize_text(reference, metric_cfg)
+            ),
+            False,
         )
     if name == "rouge":
         variants = list(metric_cfg.get("variants", ["rouge1", "rouge2", "rougeL"]))
         scorer = rouge_scorer.RougeScorer(variants, use_stemmer=bool(metric_cfg.get("use_stemmer", True)))
-        return lambda predicted, reference: {
-            variant: scorer.score(reference, predicted)[variant].fmeasure for variant in variants
-        }
+        return (
+            lambda predicted, reference: {
+                variant: scorer.score(reference, predicted)[variant].fmeasure for variant in variants
+            },
+            True,
+        )
+    if name == "bertscore":
+        return _build_bertscore_scorer(metric_cfg), True
     raise ValueError(f"Unsupported similarity metric: {name}")
+
+
+def _build_bertscore_scorer(metric_cfg: Mapping[str, Any]):
+    """Standard (non-domain-specific) BERTScore, deliberately kept generic -
+    this framework stays domain-agnostic on the metrics side, same as every
+    other similarity metric here. Model defaults to roberta-large (bert-score's
+    own standard English default); device auto-detects CUDA unless overridden,
+    with an explicit `device` config key as an escape hatch if it ever turns
+    out to contend for GPU memory with the model still being served at the
+    point this runs (compute_and_save_metrics executes before stop_vllm).
+
+    A single BERTScorer is built once here and reused per-sample (mirroring
+    RougeScorer above) so the ~1.4GB model loads once, not per sample - still
+    one forward pass per sample rather than a single batched call across the
+    whole dataset, which would be faster but would require restructuring the
+    per-sample scoring loop this shares with every other metric. Worth
+    revisiting if this proves too slow in practice at eval_limit: null scale.
+    """
+    from bert_score import BERTScorer
+
+    scorer = BERTScorer(
+        model_type=str(metric_cfg.get("model_type", "roberta-large")),
+        lang="en",
+        device=metric_cfg.get("device"),
+        rescale_with_baseline=bool(metric_cfg.get("rescale_with_baseline", False)),
+    )
+
+    def score(predicted: str, reference: str) -> dict[str, float]:
+        precision, recall, f1 = scorer.score([predicted], [reference])
+        # Prefixed, not bare "precision"/"recall"/"f1": the headline-metrics
+        # flattening (data_loader.py's _extract_answer_metrics) merges every
+        # target's metrics into one flat name -> value dict per report, and
+        # bare names would collide with mcq's own classification
+        # precision/recall/f1 - silently overwriting them if this metric were
+        # ever enabled on an mcq profile, exactly the "plug this into CDKR"
+        # case this framework is meant to support without breaking anything.
+        return {
+            "bertscore_precision": precision.item(),
+            "bertscore_recall": recall.item(),
+            "bertscore_f1": f1.item(),
+        }
+
+    return score
+
+
+def _active_similarity_metrics(profile: Mapping[str, Any]) -> list[tuple[str, str, Any, bool]]:
+    """(target, metric_name, scorer_fn, is_multi_valued) for every enabled
+    similarity.metrics entry in a profile's `similarity:` block - shared by
+    both mcq and generative summarizers so a metric configured under either
+    task type's profile works identically, with no per-task-type wiring.
+    """
+    similarity_cfg = profile.get("similarity", {})
+    if not bool(similarity_cfg.get("enabled", True)):
+        return []
+    active_metrics: list[tuple[str, str, Any, bool]] = []
+    for metric_cfg in similarity_cfg.get("metrics", []):
+        if not bool(metric_cfg.get("enabled", True)):
+            continue
+        scorer_fn, is_multi_valued = _build_similarity_scorer(metric_cfg)
+        active_metrics.append((metric_cfg["target"], metric_cfg["name"], scorer_fn, is_multi_valued))
+    return active_metrics
+
+
+def _aggregate_similarity_scores(
+    scalar_scores: Mapping[tuple[str, str], list[float]],
+    multi_valued_scores: Mapping[tuple[str, str], Mapping[str, list[float]]],
+) -> dict[str, dict[str, Any]]:
+    """Turns accumulated per-sample similarity scores into the shared
+    {target: {metric_name: summary}} shape both task types report under."""
+    summary: dict[str, dict[str, Any]] = {}
+
+    for (target, name), scores in scalar_scores.items():
+        summary_stats = aggregate_values(scores, ["mean", "min", "max"])
+        summary_stats["evaluated_count"] = len(scores)
+        if name == "exact_match":
+            summary_stats["correct_count"] = int(sum(scores))
+            summary_stats["accuracy"] = (
+                summary_stats["correct_count"] / summary_stats["evaluated_count"]
+                if summary_stats["evaluated_count"] > 0
+                else None
+            )
+        summary.setdefault(target, {})[name] = summary_stats
+
+    for (target, name), variants in multi_valued_scores.items():
+        variant_summaries: dict[str, Any] = {}
+        for variant, scores in variants.items():
+            variant_summary = aggregate_values(scores, ["mean", "min", "max"])
+            variant_summary["evaluated_count"] = len(scores)
+            variant_summaries[variant] = variant_summary
+        summary.setdefault(target, {})[name] = variant_summaries
+
+    return summary
 
 
 def _summarize_generative_group(
@@ -240,21 +347,7 @@ def _summarize_generative_group(
     dataset: str,
     include_diagnostics: bool = True,
 ) -> dict[str, Any]:
-    similarity_cfg = profile.get("similarity", {})
-    similarity_enabled = bool(similarity_cfg.get("enabled", True))
-
-    # (target, metric_name, scorer_fn, is_rouge, variants) per active metric,
-    # scorers built once up front rather than per-sample.
-    active_metrics: list[tuple[str, str, Any, bool, list[str]]] = []
-    if similarity_enabled:
-        for metric_cfg in similarity_cfg.get("metrics", []):
-            if not bool(metric_cfg.get("enabled", True)):
-                continue
-            is_rouge = metric_cfg.get("name") == "rouge"
-            variants = list(metric_cfg.get("variants", ["rouge1", "rouge2", "rougeL"])) if is_rouge else []
-            active_metrics.append(
-                (metric_cfg["target"], metric_cfg["name"], _build_similarity_scorer(metric_cfg), is_rouge, variants)
-            )
+    active_metrics = _active_similarity_metrics(profile)
 
     include_parsing_summary = bool(profile.get("include_parsing_summary", True))
     # output_tokens/input_tokens - only meaningful for tasks whose input is
@@ -264,13 +357,16 @@ def _summarize_generative_group(
     reporting_cfg = profile.get("reporting", {})
     compression_ratios: list[float] = []
 
-    # (target, name) -> list of scores, for exact_match/token_f1 style metrics.
+    # (target, name) -> list of scores, for single-valued metrics (exact_match, token_f1).
     scalar_scores: dict[tuple[str, str], list[float]] = {
-        (target, name): [] for target, name, _, is_rouge, _ in active_metrics if not is_rouge
+        (target, name): [] for target, name, _, is_multi_valued in active_metrics if not is_multi_valued
     }
-    # target -> variant -> list of scores, for rouge.
-    rouge_scores: dict[str, dict[str, list[float]]] = {
-        target: {variant: [] for variant in variants} for target, _, _, is_rouge, variants in active_metrics if is_rouge
+    # (target, name) -> variant -> list of scores, for multi-valued metrics
+    # (rouge's configured variants; bertscore's fixed precision/recall/f1) -
+    # keyed by name too, not just target, since a target could in principle
+    # have more than one multi-valued metric configured on it at once.
+    multi_valued_scores: dict[tuple[str, str], dict[str, list[float]]] = {
+        (target, name): defaultdict(list) for target, name, _, is_multi_valued in active_metrics if is_multi_valued
     }
 
     evaluated_count = 0
@@ -339,31 +435,37 @@ def _summarize_generative_group(
             compression_ratios.append(compression_ratio)
 
         sample_scores: dict[str, dict[str, Any]] = {}
-        for target, name, scorer_fn, is_rouge, _ in active_metrics:
+        for target, name, scorer_fn, is_multi_valued in active_metrics:
             predicted = extracted.get(target)
             reference = str(result.ref_fields.get(target, "")).strip()
             if not predicted or not reference:
                 continue
             score = scorer_fn(predicted, reference)
             sample_scores.setdefault(target, {})[name] = score
-            if is_rouge:
+            if is_multi_valued:
                 for variant, value in score.items():
-                    rouge_scores[target][variant].append(value)
+                    multi_valued_scores[(target, name)][variant].append(value)
             else:
                 scalar_scores[(target, name)].append(score)
 
         if sample_scores:
             all_sample_scores[result.sample_id] = sample_scores
 
+        # Composite score for worst/best-example diagnostics: average across
+        # every configured metric on the "answer" target, whatever those
+        # metrics happen to be - a multi-valued metric (rouge, bertscore, or
+        # any future one) first collapses to its own mean before joining the
+        # average, so this isn't special-cased to any one metric name.
         answer_scores = sample_scores.get("answer", {})
-        scalar_answer_scores = [v for v in answer_scores.values() if isinstance(v, (int, float))]
-        answer_rouge = answer_scores.get("rouge")
-        if scalar_answer_scores:
-            composite_score = sum(scalar_answer_scores) / len(scalar_answer_scores)
-        elif answer_rouge:
-            composite_score = sum(answer_rouge.values()) / len(answer_rouge)
-        else:
-            composite_score = 0.0
+        per_metric_composites: list[float] = []
+        for value in answer_scores.values():
+            if isinstance(value, (int, float)):
+                per_metric_composites.append(value)
+            elif isinstance(value, dict) and value:
+                numeric_values = [v for v in value.values() if isinstance(v, (int, float))]
+                if numeric_values:
+                    per_metric_composites.append(sum(numeric_values) / len(numeric_values))
+        composite_score = sum(per_metric_composites) / len(per_metric_composites) if per_metric_composites else 0.0
 
         per_sample_rows.append(
             {
@@ -397,25 +499,8 @@ def _summarize_generative_group(
     if include_parsing_summary:
         metrics_summary["format"] = format_summary
 
-    for (target, name), scores in scalar_scores.items():
-        summary_stats = aggregate_values(scores, ["mean", "min", "max"])
-        summary_stats["evaluated_count"] = len(scores)
-        if name == "exact_match":
-            summary_stats["correct_count"] = int(sum(scores))
-            summary_stats["accuracy"] = (
-                summary_stats["correct_count"] / summary_stats["evaluated_count"]
-                if summary_stats["evaluated_count"] > 0
-                else None
-            )
-        metrics_summary.setdefault(target, {})[name] = summary_stats
-
-    for target, variants in rouge_scores.items():
-        rouge_summary: dict[str, Any] = {}
-        for variant, scores in variants.items():
-            variant_summary = aggregate_values(scores, ["mean", "min", "max"])
-            variant_summary["evaluated_count"] = len(scores)
-            rouge_summary[variant] = variant_summary
-        metrics_summary.setdefault(target, {})["rouge"] = rouge_summary
+    for target, target_summary in _aggregate_similarity_scores(scalar_scores, multi_valued_scores).items():
+        metrics_summary.setdefault(target, {}).update(target_summary)
 
     if enable_compression:
         compression_summary = aggregate_values(compression_ratios, ["mean", "min", "max"])
@@ -625,6 +710,20 @@ def _summarize_mcq_group(
     reporting_cfg = profile.get("reporting", {})
     answer_patterns = list(profile.get("extraction", {}).get("answer_patterns", []))
 
+    # Same similarity.metrics mechanism generative profiles use (rouge,
+    # token_f1, bertscore, ...) - here scored on the extracted answer letter
+    # against the reference letter. Statistically thin on single-letter
+    # strings for most of these metrics, but the point is that any metric
+    # configured in an mcq profile's `similarity:` block works without this
+    # function needing to know about it by name.
+    active_metrics = _active_similarity_metrics(profile)
+    scalar_scores: dict[tuple[str, str], list[float]] = {
+        (target, name): [] for target, name, _, is_multi_valued in active_metrics if not is_multi_valued
+    }
+    multi_valued_scores: dict[tuple[str, str], dict[str, list[float]]] = {
+        (target, name): defaultdict(list) for target, name, _, is_multi_valued in active_metrics if is_multi_valued
+    }
+
     evaluated_count = 0
     correct_count = 0
     parsed_success_count = 0
@@ -661,6 +760,16 @@ def _summarize_mcq_group(
         extraction = extract_mcq_answer_letter(result.response, answer_patterns)
         status = extraction["status"]
         pred = extraction["letter"]
+
+        for target, name, scorer_fn, is_multi_valued in active_metrics:
+            if target != "answer" or pred is None:
+                continue
+            score = scorer_fn(pred, ref_answer)
+            if is_multi_valued:
+                for variant, value in score.items():
+                    multi_valued_scores[(target, name)][variant].append(value)
+            else:
+                scalar_scores[(target, name)].append(score)
 
         label_stats.setdefault(ref_answer, {"tp": 0, "fp": 0, "fn": 0})
 
@@ -714,6 +823,9 @@ def _summarize_mcq_group(
         )
 
     summary: dict[str, Any] = {}
+
+    for target, target_summary in _aggregate_similarity_scores(scalar_scores, multi_valued_scores).items():
+        summary[target] = target_summary
 
     if enable_accuracy:
         summary["accuracy"] = {
