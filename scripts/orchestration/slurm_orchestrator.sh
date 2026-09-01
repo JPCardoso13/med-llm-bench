@@ -35,8 +35,18 @@ export SLURM_TMPDIR="${SLURM_TMPDIR:-/tmp/med-llm-bench-hf-$$}"
 # BF16 models require tensor_parallel_size: 8).
 NODES="${NODES:-2}"
 TIME_LIMIT="${TIME_LIMIT:-03:00:00}"
+# Optional, e.g. EXCLUDE_NODES=aurora06 - not a confirmed-bad-node list,
+# just a cheap way to route around a node that showed a real failure
+# (connection drop / raylet crash in dmesg) until there's enough evidence
+# either way. Empty by default.
+EXCLUDE_NODES="${EXCLUDE_NODES:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+exclude_args=()
+if [[ -n "$EXCLUDE_NODES" ]]; then
+    exclude_args=(--exclude="$EXCLUDE_NODES")
+fi
 
 sbatch \
     --job-name=slurm_orchestrator \
@@ -44,6 +54,7 @@ sbatch \
     --account=haslab \
     --nodes="$NODES" \
     --time="$TIME_LIMIT" \
+    "${exclude_args[@]}" \
     --output=logs/orchestration/out/slurm_orchestrator_%j.out \
     --error=logs/orchestration/err/slurm_orchestrator_%j.err \
     "$SCRIPT_DIR/run_pipeline.sh"

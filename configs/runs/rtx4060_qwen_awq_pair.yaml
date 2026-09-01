@@ -1,0 +1,13 @@
+# Both AWQ-quantized Qwen3.6 models, run together. Smaller and TP=2 (not
+# TP=4 like the FP8 pair), and both fit safely for persistent /projects
+# caching (verified real headroom 2026-08-23). Paired with
+# rtx4060_qwen_fp8_pair.yaml, which stays on ephemeral node-local cache
+# since the FP8 models don't fit /projects' quota.
+tasks:
+  - cdkr
+  - oecr
+  - src
+
+models:
+  - qwen3_6_27b_awq_quanttrio
+  - qwen3_6_35b_a3b_awq_quanttrio

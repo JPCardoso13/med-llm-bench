@@ -1,0 +1,13 @@
+# qwen3_6_35b_a3b_awq_quanttrio only. Split out of rtx4060_qwen_awq_pair.yaml
+# because that model actually needs tensor_parallel_size: 4 (its own model
+# config, not TP=2 like its 27B sibling - the pair config's old comment
+# claiming TP=2 for both was wrong, and likely why job 175458 never made
+# progress on this model). Run with SKIP_JUDGE=1, NODES=4 - judging happens
+# in a later, separate pass once this has raw/ output.
+tasks:
+  - cdkr
+  - oecr
+  - src
+
+models:
+  - qwen3_6_35b_a3b_awq_quanttrio

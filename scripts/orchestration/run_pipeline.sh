@@ -26,8 +26,10 @@ export SIF="med-llm-bench.sif"
 
 # Namespaces outputs/ and logs/vllm/ per run (orchestrator.py, llm_judge_run.py
 # default to the same fallback if RUN_ID isn't in their environment) so two
-# runs never mix or overwrite each other's results.
-RUN_ID="${SLURM_JOB_ID:-manual}"
+# runs never mix or overwrite each other's results. Overridable (not just
+# SLURM_JOB_ID-or-manual) specifically so SKIP_GENERATION=1 can point a new
+# job's judge-only pass at an older run's existing outputs/<RUN_ID>/ tree.
+RUN_ID="${RUN_ID:-${SLURM_JOB_ID:-manual}}"
 
 HF_CACHE_MODE="${HF_CACHE_MODE:-persistent}"
 if [[ "$HF_CACHE_MODE" == "ephemeral" ]]; then
@@ -90,7 +92,12 @@ cleanup() {
         # other node's downloaded weights to accumulate release over release.
         echo "Cleaning ephemeral Hugging Face cache on all ${#nodes_array[@]} allocated node(s): $HF_HOME"
         for node in "${nodes_array[@]}"; do
-            timeout 30 srun --overlap --nodes=1 --ntasks=1 -w "$node" rm -rf "$HF_HOME" >/dev/null 2>&1 || true
+            # 120s, not 30s: confirmed on 2026-08-20 that 30s wasn't enough
+            # for a multi-GB, many-small-file HF cache (blobs/snapshots/
+            # locks) - rm -rf got cut off mid-delete on jobs killed via
+            # scancel, leaving tens of GB of partial leftovers per node that
+            # then sat there until manually found and cleaned up.
+            timeout 120 srun --overlap --nodes=1 --ntasks=1 -w "$node" rm -rf "$HF_HOME" >/dev/null 2>&1 || true
         done
     fi
     if [[ ${#TELEMETRY_PIDS[@]} -gt 0 ]]; then
@@ -121,7 +128,14 @@ mkdir -p configs/runtime
 # .container_overlay/ - see .gitignore) - harmless no-op once that directory
 # doesn't exist (e.g. after the next rebuild bakes it in properly and this
 # gets cleaned up).
-singularity_exports="ALL,SINGULARITYENV_HF_HOME=$HF_HOME,SINGULARITYENV_HUGGINGFACE_HUB_CACHE=$HF_HOME/hub,SINGULARITYENV_HF_HUB_OFFLINE=$HF_HUB_OFFLINE,SINGULARITYENV_TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE,SINGULARITYENV_HF_DATASETS_OFFLINE=$HF_DATASETS_OFFLINE,SINGULARITYENV_HF_OFFLINE=$HF_OFFLINE,SINGULARITYENV_HF_EVICT_BETWEEN_MODELS=$HF_EVICT_BETWEEN_MODELS,SINGULARITYENV_PYTORCH_ALLOC_CONF=expandable_segments:True,SINGULARITYENV_PYTHONPATH=$WORKDIR${PYTHONPATH:+:$PYTHONPATH},SINGULARITYENV_PYTHONUSERBASE=$WORKDIR/.container_overlay,SINGULARITYENV_LLM_API_KEY=${LLM_API_KEY:-EMPTY},SINGULARITYENV_LLM_NODE_COUNT=$node_count,SINGULARITYENV_SERVE_PORT=$SERVE_PORT,SINGULARITYENV_RUN_CONFIG=$RUN_CONFIG,SINGULARITYENV_RUN_ID=$RUN_ID"
+# HF_HUB_DISABLE_XET: the container's newer huggingface_hub pulls in hf-xet
+# (the newer fast-transfer client) automatically - confirmed on 2026-08-20
+# that it fails on Qwen/QuantTrio repos specifically, either with an
+# explicit "I/O error: error decoding response body" or, worse, an
+# unbounded silent hang at engine init with no error at all (only killed by
+# the startup timeout) - while it downloaded meta-llama's repo without
+# issue. This forces the older, plain-HTTP download path instead.
+singularity_exports="ALL,SINGULARITYENV_HF_HOME=$HF_HOME,SINGULARITYENV_HUGGINGFACE_HUB_CACHE=$HF_HOME/hub,SINGULARITYENV_HF_HUB_OFFLINE=$HF_HUB_OFFLINE,SINGULARITYENV_TRANSFORMERS_OFFLINE=$TRANSFORMERS_OFFLINE,SINGULARITYENV_HF_DATASETS_OFFLINE=$HF_DATASETS_OFFLINE,SINGULARITYENV_HF_OFFLINE=$HF_OFFLINE,SINGULARITYENV_HF_EVICT_BETWEEN_MODELS=$HF_EVICT_BETWEEN_MODELS,SINGULARITYENV_HF_HUB_DISABLE_XET=1,SINGULARITYENV_PYTORCH_ALLOC_CONF=expandable_segments:True,SINGULARITYENV_PYTHONPATH=$WORKDIR${PYTHONPATH:+:$PYTHONPATH},SINGULARITYENV_PYTHONUSERBASE=$WORKDIR/.container_overlay,SINGULARITYENV_LLM_API_KEY=${LLM_API_KEY:-EMPTY},SINGULARITYENV_LLM_NODE_COUNT=$node_count,SINGULARITYENV_SERVE_PORT=$SERVE_PORT,SINGULARITYENV_RUN_CONFIG=$RUN_CONFIG,SINGULARITYENV_RUN_ID=$RUN_ID"
 
 # outputs/<RUN_ID>/{raw,reports,judged} and logs/vllm/<RUN_ID> are created
 # on demand by orchestrator.py/llm_judge_run.py/vllm_manager.py themselves
@@ -208,24 +222,39 @@ echo "Telemetry endpoints configured: ${#TELEMETRY_ENDPOINTS[@]} node(s)"
 echo "Cache mode: ${HF_CACHE_MODE} | HF_HOME=${HF_HOME} | Offline=${HF_OFFLINE}"
 echo "Run config: ${RUN_CONFIG}"
 
-python_script="scripts/orchestration/orchestrator.py"
-echo "Running orchestrator: $python_script"
+# SKIP_GENERATION=1: resume-only mode, for when generation already
+# completed and was safely saved (confirmed via raw/ + "Successful tasks: N
+# | Failed tasks: 0" in a prior run's log) but the judge pass or report
+# generation got cut off after it (e.g. hit the job's own TIME_LIMIT) -
+# skips straight to the judge pass against RUN_ID's existing raw/ data
+# instead of redoing the expensive part. Added 2026-08-22 after exactly
+# this happened to a 44h run that finished all generation but ran out of
+# time mid-judge-pass.
+if [[ "${SKIP_GENERATION:-0}" == "1" ]]; then
+    echo "SKIP_GENERATION=1: skipping orchestrator, resuming judge pass against existing outputs/${RUN_ID}/raw/"
+    EXIT_CODE=0
+else
+    python_script="scripts/orchestration/orchestrator.py"
+    echo "Running orchestrator: $python_script"
 
-# EXIT_CODE is captured via `|| EXIT_CODE=$?`, not a bare `EXIT_CODE=$?`
-# after the command, because under `set -e` a failing plain command aborts
-# the script immediately (straight to the cleanup trap) before the next
-# line would even run - that would make the success/failure branching below
-# unreachable on the failure path.
-EXIT_CODE=0
-srun --overlap --nodes=1 --ntasks=1 \
-    --export="${singularity_exports}" \
-    "$SINGULARITY_BIN" exec --nv --env-file .env "$SIF" \
-    python3 -u "$python_script" || EXIT_CODE=$?
+    # EXIT_CODE is captured via `|| EXIT_CODE=$?`, not a bare `EXIT_CODE=$?`
+    # after the command, because under `set -e` a failing plain command aborts
+    # the script immediately (straight to the cleanup trap) before the next
+    # line would even run - that would make the success/failure branching below
+    # unreachable on the failure path.
+    EXIT_CODE=0
+    srun --overlap --nodes=1 --ntasks=1 \
+        --export="${singularity_exports}" \
+        "$SINGULARITY_BIN" exec --nv --env-file .env "$SIF" \
+        python3 -u "$python_script" || EXIT_CODE=$?
 
-echo "Orchestrator exited with code: $EXIT_CODE"
+    echo "Orchestrator exited with code: $EXIT_CODE"
+fi
 ORCHESTRATOR_EXIT_CODE=$EXIT_CODE
 
-if [[ "$EXIT_CODE" -eq 0 ]]; then
+if [[ "${SKIP_JUDGE:-0}" == "1" ]]; then
+    echo "SKIP_JUDGE=1: skipping LLM-as-judge pass, keeping raw/ generation output only"
+elif [[ "$EXIT_CODE" -eq 0 ]]; then
     echo "Running LLM-as-judge pass: $JUDGE_MODEL_CONFIG"
 
     JUDGE_EXIT_CODE=0

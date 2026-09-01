@@ -1,10 +1,13 @@
-# Temporary subset of rtx4060_production.yaml for boot-check purposes only -
-# excludes the 4 Qwen3.6 configs (blocked: this cluster's vllm 0.15.1 /
-# transformers 4.57.6 don't recognize the qwen3_5/qwen3_5_moe architecture at
-# all) and the TP=8 pair (gemma3/medgemma - dropped for now, see
-# rtx4060_production.yaml's comment). Once both are resolved, go back to
-# rtx4060_production.yaml and retire this file - it's not a second
-# permanent roster.
+# Subset of rtx4060_production.yaml, currently used for the 2026-08-20
+# overnight Llama-tier run. Excludes the 4 Qwen3.6 configs - not blocked
+# anymore (qwen3_6_27b_awq_quanttrio completed a full clean run earlier
+# today), just deliberately left out of tonight's run so its downloads
+# don't compete for bandwidth with this one; Qwen gets its own run once a
+# caching/retry strategy is decided. Also excludes the TP=8 pair
+# (gemma3/medgemma - dropped for now, see rtx4060_production.yaml's
+# comment). Once Qwen and TP=8 are both back in, retire this file and go
+# back to rtx4060_production.yaml - it's not meant as a second permanent
+# roster.
 tasks:
   - cdkr
   - oecr

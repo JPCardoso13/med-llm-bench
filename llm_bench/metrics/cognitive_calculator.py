@@ -940,6 +940,12 @@ def _build_mcq_classification_summary(label_stats: Mapping[str, Mapping[str, int
             "tp": tp,
             "fp": fp,
             "fn": fn,
+            # precision/recall/f1 were already computed above for the macro
+            # average - stored per-label too so reporting can chart the
+            # breakdown directly instead of just the averaged scalar.
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
         }
 
     return {

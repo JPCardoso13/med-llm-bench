@@ -1,0 +1,15 @@
+# Both FP8 Qwen3.6 models, run together. TP=4, and too large to safely fit
+# /projects' quota for persistent caching (qwen3_6_35b_a3b_fp8 alone would
+# exceed it) - standard ephemeral node-local cache instead. Real,
+# unresolved connection-drop risk on long downloads for this cluster - if
+# this combined run fails, next step is trying each model individually,
+# then (if that still fails) node-local /tmp caching with node pinning as
+# a last resort. Paired with rtx4060_qwen_awq_pair.yaml.
+tasks:
+  - cdkr
+  - oecr
+  - src
+
+models:
+  - qwen3_6_27b_fp8
+  - qwen3_6_35b_a3b_fp8

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
 import shutil
@@ -8,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import torch
 import yaml
 
 from scripts.vllm.vllm_manager import start_vllm, stop_vllm
@@ -385,19 +387,33 @@ def load_task_bundle(task_cfg_path: Path) -> dict[str, Any]:
 
 
 def run_single_model(model_config_path: Path, task_bundles: list[dict[str, Any]], serve_port: int, startup_timeout_s: int) -> dict[str, dict[str, Any]]:
-    """Serve one model once and run it across every task.
+    """Serve one model once, generate across every task, then compute
+    metrics for every task only after the server has stopped.
 
     Model-outer/task-inner: each model is downloaded and cold-started by
     vLLM exactly once for the whole run, then reused across all tasks,
     instead of the previous task-outer/model-inner nesting which restarted
     (and, under HF_EVICT_BETWEEN_MODELS, re-downloaded) every model once per
     task - Nx redundant loads for an N-task run.
+
+    Generation and metrics computation are two separate passes, not
+    interleaved per task, specifically so metrics computation runs after
+    stop_vllm() frees the GPU - previously it ran between generation calls
+    while vLLM was still serving (and still holding most of the GPU's
+    memory), which is what forced any GPU-hungry metric (bertscore) onto
+    CPU. Confirmed costing ~4h/model for oecr alone at eval_limit: null
+    scale (2026-08-20) - GPU bertscore should be closer to minutes.
     """
     model_name = model_config_path.stem
     model_cfg = load_yaml(model_config_path)
 
     print(f"\n== Model: {model_name} ==")
-    entries_by_task: dict[str, dict[str, Any]] = {}
+
+    # Pass 1: generation only, while vLLM is up. Per-task exceptions here
+    # (raw_results[task_id] holds an Exception instead of a result) skip
+    # that task's metrics computation in pass 2 below, same isolation the
+    # single-pass version had.
+    raw_results: dict[str, tuple[Path, Any] | Exception] = {}
     handle = None
     try:
         model_startup_timeout_s = int(model_cfg.get("startup_timeout_s", startup_timeout_s))
@@ -415,34 +431,62 @@ def run_single_model(model_config_path: Path, task_bundles: list[dict[str, Any]]
             task_id = bundle["task_id"]
             print(f"\n  -- Task: {task_id} --")
             try:
-                raw_path, dataset_status = run_benchmark_for_model(
+                raw_results[task_id] = run_benchmark_for_model(
                     model_cfg, model_name, bundle["task_cfg"], bundle["runtime_cfg"], handle.base_url, task_id
                 )
-                systems_path, cognitive_path = compute_and_save_metrics(
-                    model_name, raw_path, task_id, bundle["systems_profile"], bundle["cognitive_profile"]
-                )
-                print(f"    Systems summary: {systems_path}")
-                if cognitive_path:
-                    print(f"    Cognitive summary: {cognitive_path}")
-                entries_by_task[task_id] = {
-                    "model_name": model_name,
-                    "raw_results": str(raw_path),
-                    "systems_summary": str(systems_path),
-                    "cognitive_summary": str(cognitive_path) if cognitive_path else None,
-                    "serve_mode": handle.mode,
-                    "datasets": dataset_status,
-                }
             except Exception as exc:
-                print(f"  ERROR processing {model_name} on task {task_id}: {exc}")
-                entries_by_task[task_id] = {"model_name": model_name, "error": str(exc)}
+                print(f"  ERROR generating {model_name} on task {task_id}: {exc}")
+                raw_results[task_id] = exc
     except Exception as exc:
         print(f"ERROR starting {model_name}: {exc}")
         for bundle in task_bundles:
-            entries_by_task[bundle["task_id"]] = {"model_name": model_name, "error": str(exc)}
+            raw_results[bundle["task_id"]] = exc
     finally:
+        serve_mode = handle.mode if handle is not None else "unknown"
         stop_vllm(handle)
         time.sleep(8)
         maybe_evict_hf_cache_between_models()
+
+    # Pass 2: metrics computation, now that the GPU is free.
+    entries_by_task: dict[str, dict[str, Any]] = {}
+    for bundle in task_bundles:
+        task_id = bundle["task_id"]
+        result = raw_results.get(task_id)
+        if isinstance(result, Exception):
+            entries_by_task[task_id] = {"model_name": model_name, "error": str(result)}
+            continue
+
+        raw_path, dataset_status = result
+        try:
+            systems_path, cognitive_path = compute_and_save_metrics(
+                model_name, raw_path, task_id, bundle["systems_profile"], bundle["cognitive_profile"]
+            )
+            print(f"    Systems summary: {systems_path}")
+            if cognitive_path:
+                print(f"    Cognitive summary: {cognitive_path}")
+            entries_by_task[task_id] = {
+                "model_name": model_name,
+                "raw_results": str(raw_path),
+                "systems_summary": str(systems_path),
+                "cognitive_summary": str(cognitive_path) if cognitive_path else None,
+                "serve_mode": serve_mode,
+                "datasets": dataset_status,
+            }
+        except Exception as exc:
+            print(f"  ERROR computing metrics for {model_name} on task {task_id}: {exc}")
+            entries_by_task[task_id] = {"model_name": model_name, "error": str(exc)}
+
+    # bertscore's model runs on GPU now (see cognitive.generative*.yaml) and
+    # this orchestrator process stays alive across every model in the run -
+    # without this, its CUDA memory lingers past this model's metrics pass
+    # and starves the next model's vLLM startup of the GPU headroom it
+    # expects. Confirmed: this is exactly what broke a second model's
+    # startup ("Free memory ... is less than desired GPU memory
+    # utilization") immediately after the first model's metrics finished,
+    # 2026-08-20.
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return entries_by_task
 

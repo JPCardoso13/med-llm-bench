@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import pandas as pd
+
 from llm_bench.reporting import (
     load_headline_metrics,
     load_group_by_metrics,
+    load_mcq_label_metrics,
     load_judge_distributions,
     load_judge_agreement,
     load_systems_metrics,
@@ -257,7 +260,11 @@ def main() -> None:
         print(f"No cognitive_summary.json files found under {reports_dir} - nothing to report.")
         return
 
-    group_df = load_group_by_metrics(reports_dir)
+    # mcq_label_df is shaped identically to group_df on purpose (see
+    # load_mcq_label_metrics) and concatenated straight in - answer letter
+    # is just one more grouping dimension, so it rides along through
+    # build_subgroups without needing its own build_* function.
+    group_df = pd.concat([load_group_by_metrics(reports_dir), load_mcq_label_metrics(reports_dir)], ignore_index=True)
     judge_df = load_judge_distributions(reports_dir)
     judge_agreement_df = load_judge_agreement(reports_dir)
     systems_df = load_systems_metrics(reports_dir)

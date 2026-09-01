@@ -189,6 +189,63 @@ def load_group_by_metrics(reports_dir: str | Path = "outputs/reports", fields: l
     )
 
 
+def load_mcq_label_metrics(reports_dir: str | Path = "outputs/reports") -> pd.DataFrame:
+    """Per-answer-letter precision/recall/f1 from _build_mcq_classification_summary's
+    per_label breakdown (cognitive_calculator.py) - computed since this
+    project's early sessions but never surfaced anywhere before now; only
+    the macro-averaged scalar reached reports.
+
+    Shaped identically to load_group_by_metrics's output (group_field fixed
+    to "answer_letter") specifically so this can be concatenated straight
+    into that DataFrame and reuse build_subgroups/plot_group_by_heatmap/
+    pivot_group_by_table as-is - answer letter is just one more grouping
+    dimension, no new chart/table code needed.
+    """
+    rows: list[dict[str, Any]] = []
+    reports_dir = Path(reports_dir)
+
+    for task_dir in sorted(reports_dir.glob("*")):
+        if not task_dir.is_dir():
+            continue
+        task_id = task_dir.name
+
+        for model_dir in sorted(task_dir.glob("*")):
+            summary_path = model_dir / "cognitive_summary.json"
+            if not summary_path.exists():
+                continue
+            model_name = model_dir.name
+
+            data = json.loads(summary_path.read_text())
+            for group in data.get("groups", []):
+                dataset = group["dataset"]
+                mcq = group["metrics"].get("mcq")
+                if not mcq:
+                    continue
+                for metric_name in ("precision", "recall", "f1"):
+                    per_label = mcq.get(metric_name, {}).get("per_label", {})
+                    for label, stats in per_label.items():
+                        value = stats.get(metric_name)
+                        if value is None:
+                            continue
+                        tp = stats.get("tp", 0) or 0
+                        fn = stats.get("fn", 0) or 0
+                        rows.append({
+                            "task_id": task_id,
+                            "model_name": model_name,
+                            "dataset": dataset,
+                            "group_field": "answer_letter",
+                            "group_value": label,
+                            "metric_name": metric_name,
+                            "value": value,
+                            "sample_count": tp + fn,  # samples whose reference answer was this letter
+                        })
+
+    return pd.DataFrame(
+        rows,
+        columns=["task_id", "model_name", "dataset", "group_field", "group_value", "metric_name", "value", "sample_count"],
+    )
+
+
 def load_judge_distributions(reports_dir: str | Path = "outputs/reports") -> pd.DataFrame:
     """One row per (task, model, dataset, rubric_item, label, percentage).
 
@@ -390,6 +447,18 @@ def load_reliability_metrics(
                     rate_name = count_key.replace("_count", "_rate")
                     rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
                                   "metric_name": rate_name, "value": count / sample_count})
+
+                # Model bleeding a second section into its answer (e.g. an
+                # unlabeled "Explanation:" appended after the actual answer)
+                # - a distinct failure mode from parse_failure_rate (which
+                # only sees content, not extraction success), computed since
+                # early in this project but never surfaced until now.
+                answer_contaminated_count = (
+                    group["metrics"].get("generative", {}).get("metrics", {}).get("format", {}).get("answer_contaminated_count")
+                )
+                if answer_contaminated_count is not None:
+                    rows.append({"task_id": task_id, "model_name": model_name, "dataset": dataset,
+                                  "metric_name": "answer_contaminated_rate", "value": answer_contaminated_count / sample_count})
 
                 llm_judge = group["metrics"].get("llm_judge")
                 if llm_judge and judge_flag_rates:

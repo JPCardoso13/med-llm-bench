@@ -1,6 +1,7 @@
 from .data_loader import (
     load_headline_metrics,
     load_group_by_metrics,
+    load_mcq_label_metrics,
     load_judge_distributions,
     load_judge_agreement,
     load_systems_metrics,
@@ -31,6 +32,7 @@ from .tables import (
 __all__ = [
     "load_headline_metrics",
     "load_group_by_metrics",
+    "load_mcq_label_metrics",
     "load_judge_distributions",
     "load_judge_agreement",
     "load_systems_metrics",
