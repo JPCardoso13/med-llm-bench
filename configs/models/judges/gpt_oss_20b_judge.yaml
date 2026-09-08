@@ -19,3 +19,11 @@ gpu_memory_utilization: 0.90
 enforce_eager: true
 # ~11MB/s measured on this cluster; 12.8GB raw ~19min, generous margin.
 startup_timeout_s: 5400
+# gpt-oss-20b is a reasoning model (vLLM auto-enables its openai_gptoss
+# reasoning parser) - the default 512-token completion budget was getting
+# entirely consumed by reasoning before the model ever reached the final
+# JSON answer, especially on longer/harder prompts (src's full-document
+# summarization judging: 85%+ parse failure, vs oecr's short clinical
+# cases: ~4%). 2048 gives real headroom for reasoning + the small JSON
+# answer on even the hardest prompts.
+max_tokens: 2048

@@ -23,7 +23,14 @@ datasets:
 execution:
   num_fewshot: 3
   flush_every: 10
-  max_tokens: 1024
+  # Bumped 1024->3072 (2026-09-08): reasoning models (Qwen3.6) burn their
+  # whole completion budget on chain-of-thought before ever stating a final
+  # answer - measured 26.4% truncated on medqa, 51.1% on medxpertqa for
+  # qwen3_6_35b_a3b_awq_quanttrio (see RESEARCH_FINDINGS.md). Non-reasoning
+  # models (Llama tier, already run) are unaffected - they stop well short
+  # of any cap on their own, so this is a safe global bump, not model-
+  # specific.
+  max_tokens: 3072
   fewshot_seed: 42  # same fewshot draws every rerun, for fair comparison
 
 runtime:

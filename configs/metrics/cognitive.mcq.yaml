@@ -11,10 +11,24 @@ enable_grouping: true
 include_parsing_summary: true
 
 extraction:
+  # v2 (2026-09-08): \b(?!\w) (v1, 2026-09-04) still let the captured letter
+  # BE a complete one-letter English word, since a space right after it also
+  # satisfies "not a word char" - "answer a multiple-choice question"
+  # matched "a" -> "A". This is systematic on reasoning models, whose
+  # responses almost always open with "...answer a ..."; on Qwen3.6-35B-AWQ
+  # cdkr/medqa it silently deflated measured accuracy from a real ~56% (spot
+  # check) down to 22.7%. Fix: require the captured letter be followed by a
+  # closing paren (clear option-marker intent, e.g. "B) Cholesterol...") OR
+  # immediately by clause-ending punctuation/newline/end-of-string - i.e. a
+  # letter followed by more lowercase prose with no punctuation ("a
+  # multiple-choice...") no longer matches. Trade-off: some genuinely
+  # unpunctuated answers now read as "missing" instead of extracted - safe,
+  # since missing only shrinks the sample size while the old bug corrupted
+  # the accuracy value itself.
   answer_patterns:
-    - 'final\s+answer\s*[:\-]?\s*\(?\s*([A-J])\s*\)?'
-    - 'answer\s*[:\-]?\s*\(?\s*([A-J])\s*\)?'
-    - 'option\s*[:\-]?\s*\(?\s*([A-J])\s*\)?'
+    - 'final\s+answer\s*(?:is|was)?\s*[:\-]?\s*\(?\s*([A-J])(?:\)|(?=[.,:;\n]|$))'
+    - 'answer\s*(?:is|was)?\s*[:\-]?\s*\(?\s*([A-J])(?:\)|(?=[.,:;\n]|$))'
+    - 'option\s*(?:is|was)?\s*[:\-]?\s*\(?\s*([A-J])(?:\)|(?=[.,:;\n]|$))'
     - '^\s*\(?\s*([A-J])\s*\)?\s*$'
 
 reporting:

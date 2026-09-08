@@ -3,9 +3,13 @@ model_id: QuantTrio/Qwen3.6-35B-A3B-AWQ
 backend_api: openai_compatible
 # Distinct from qwen3_6_35b_a3b_awq_4bit.yaml (cyankiwi's AWQ build, sized
 # for Deucalion) - this is QuantTrio's AWQ build, sized for rtx4060/haslab.
-# ~22GB AWQ weights would fit at TP=2 (~11GB/GPU, ~3.4GB headroom) but TP=4
-# (~5.5GB/GPU) is used for a safer KV-cache margin, matching its FP8 sibling.
-tensor_parallel_size: 4
+# ~22GB AWQ weights fit at TP=2 (~11GB/GPU, ~3.4GB headroom); originally set
+# to TP=4 (~5.5GB/GPU) for a safer margin, matching its FP8 sibling, but the
+# 2026-09-01/02 run (175482) showed real evidence of TP=4's cross-node
+# communication overhead - cdkr+oecr alone took ~46h across 4 single-GPU
+# nodes, and it still hadn't finished all 3 tasks by the 48h wall-clock cap.
+# Switched to TP=2 for the resume of the remaining src task.
+tensor_parallel_size: 2
 max_model_len: 16384
 gpu_memory_utilization: 0.90
 enforce_eager: false

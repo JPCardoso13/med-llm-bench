@@ -71,13 +71,26 @@ def run_task(judge_client: JudgeClient, task_cfg_path: Path) -> None:
         with open(raw_path, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
 
+        judged_path = JUDGED_RESULTS_DIR / task_id / f"{model_name}.json"
+        judged_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path = REPORTS_DIR / task_id / model_name / "cognitive_summary.json"
+
         judged_by_dataset: dict[str, list[dict[str, Any]]] = {}
         for dataset_name, items in raw_data.items():
             rows = []
             for item in tqdm(items, desc=f"{task_id}/{model_name}/{dataset_name}"):
                 result = BenchmarkResult(**item)
                 messages = build_judge_messages(result, prompt_cfg)
-                raw_text = judge_client.complete(messages, response_format)
+                try:
+                    raw_text = judge_client.complete(messages, response_format)
+                except Exception as exc:  # noqa: BLE001
+                    # A malformed judge completion (e.g. a degenerate/looping
+                    # generation tripping the backend's own request validation,
+                    # seen 2026-09-04 with gpt-oss-20b) must not crash the
+                    # whole judge pass - treat it like any other parse
+                    # failure and keep going, not lose every remaining sample.
+                    print(f"  WARNING judge call failed sample_id={result.sample_id} dataset={dataset_name}: {exc}")
+                    raw_text = ""
                 parsed = parse_judge_response(raw_text, rubric)
                 rows.append(
                     {
@@ -88,12 +101,13 @@ def run_task(judge_client: JudgeClient, task_cfg_path: Path) -> None:
                 )
             judged_by_dataset[dataset_name] = rows
 
-        judged_path = JUDGED_RESULTS_DIR / task_id / f"{model_name}.json"
-        judged_path.parent.mkdir(parents=True, exist_ok=True)
-        judged_path.write_text(json.dumps(judged_by_dataset, indent=2), encoding="utf-8")
-        print(f"  Judged results: {judged_path}")
+            # Persist after every dataset, not just once at the end of the
+            # whole model/task - mirrors orchestrator.py's raw_path fix for
+            # the same reason: a later dataset's failure must not silently
+            # destroy earlier datasets' already-successful judge results.
+            judged_path.write_text(json.dumps(judged_by_dataset, indent=2), encoding="utf-8")
+            print(f"  Judged results (through {dataset_name}): {judged_path}")
 
-        summary_path = REPORTS_DIR / task_id / model_name / "cognitive_summary.json"
         if not summary_path.exists():
             print(f"  WARNING: no cognitive_summary.json at {summary_path}, skipping merge.")
             continue

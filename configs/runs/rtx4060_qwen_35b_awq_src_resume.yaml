@@ -1,0 +1,12 @@
+# Resume of rtx4060_qwen_35b_awq_solo.yaml (job 175482) for qwen3_6_35b_a3b_awq_quanttrio.
+# 175482 timed out at 48h with cdkr and oecr fully generated but src only
+# 420/1000 into pubmedsum (task-level generation has no per-dataset resume,
+# so a partially-done task restarts from scratch - only fully-finished
+# tasks are safe to drop). Submit with RUN_ID=175482 to land alongside the
+# already-completed raw/cdkr and raw/oecr data, NODES=2 to match the
+# model's now-TP=2 config.
+tasks:
+  - src
+
+models:
+  - qwen3_6_35b_a3b_awq_quanttrio

@@ -1,0 +1,14 @@
+# Real full-scale run for qwen3_6_27b_awq_quanttrio - replaces the 5-sample
+# validation check that outputs/175452 actually was (discovered 2026-09-04;
+# see RESEARCH_FINDINGS.md). Submit with RUN_ID=175452 to overwrite that
+# tiny check's raw/ data in place, keeping the same output path for the
+# eventual outputs/final/ merge. Ephemeral cache (not persistent) to avoid
+# competing for /projects quota with the still-running judge job's cached
+# gpt-oss-20b (13GB) - this model previously downloaded fine ephemerally.
+tasks:
+  - cdkr
+  - oecr
+  - src
+
+models:
+  - qwen3_6_27b_awq_quanttrio

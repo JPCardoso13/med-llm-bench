@@ -9,7 +9,8 @@ from matplotlib.colors import LinearSegmentedColormap
 # Validated categorical palette (fixed order - this IS the CVD-safety mechanism,
 # never cycle or generate past slot 8). Light-mode steps from the dataviz skill's
 # reference palette; this is a print/static-figure context, so only light mode
-# is used, not the dark-mode pairing.
+# is used, not the dark-mode pairing. Used as the fallback for any task_id not
+# in TASK_CATEGORICAL_PALETTES below.
 CATEGORICAL_PALETTE = [
     "#2a78d6",  # 1 blue
     "#008300",  # 2 green
@@ -23,9 +24,39 @@ CATEGORICAL_PALETTE = [
 FOLD_COLOR = "#898781"  # muted gray, for any model past the 8-slot ceiling
 
 # Sequential blue ramp (light -> dark), for magnitude encoding (heatmaps).
+# Fallback for any task_id not in TASK_SEQUENTIAL_RAMPS below.
 SEQUENTIAL_BLUE_STEPS = [
     "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b",
 ]
+
+# Per-task single-hue-family palettes (2026-09-04) - every chart for a given
+# task uses shades of the same hue, so a reader scanning a paper full of
+# figures can tell which task a figure belongs to at a glance, independent
+# of reading its title. Within a task, shades vary in lightness (not hue) to
+# stay distinguishable as categorical identifiers - CVD-safety here relies on
+# the per-bar/per-cell value labels already drawn on every chart, not on hue
+# separation. Add an entry here for any new task; anything absent falls back
+# to CATEGORICAL_PALETTE/SEQUENTIAL_BLUE_STEPS.
+TASK_CATEGORICAL_PALETTES: dict[str, list[str]] = {
+    "cdkr": [
+        "#1c5aa8", "#2a78d6", "#6ea8e8", "#123f7a",
+        "#4fa8d8", "#0d3b66", "#7fc4e8", "#2f4f8f",
+    ],
+    "oecr": [
+        "#1a7a1a", "#4caf50", "#0d5c0d", "#7fc97f",
+        "#2e8b57", "#0a4d0a", "#66bb6a", "#3d8b40",
+    ],
+    "src": [
+        "#6a3fa0", "#4a3aa7", "#9b7fd4", "#3a2570",
+        "#8055b8", "#2d1a52", "#b39ddb", "#5c3d99",
+    ],
+}
+
+TASK_SEQUENTIAL_RAMPS: dict[str, list[str]] = {
+    "cdkr": SEQUENTIAL_BLUE_STEPS,
+    "oecr": ["#d4edda", "#a8dab5", "#7bc788", "#4caf50", "#2e8b3d", "#1a6b1a", "#0d4d0d"],
+    "src": ["#e6d9f5", "#c9a8e8", "#ab7fd4", "#8a5cc0", "#6a3fa0", "#4a2570", "#2d1550"],
+}
 
 PRIMARY_INK = "#0b0b0b"
 SECONDARY_INK = "#52514e"
@@ -35,35 +66,40 @@ AXIS = "#c3c2b7"
 SURFACE = "#fcfcfb"
 
 
-def _sequential_cmap():
-    return LinearSegmentedColormap.from_list("seq_blue", SEQUENTIAL_BLUE_STEPS)
+def _sequential_cmap(task_id: str | None = None):
+    steps = TASK_SEQUENTIAL_RAMPS.get(task_id, SEQUENTIAL_BLUE_STEPS)
+    return LinearSegmentedColormap.from_list(f"seq_{task_id or 'default'}", steps)
 
 
-def model_color_map(model_names: list[str]) -> dict[str, str]:
+def model_color_map(model_names: list[str], task_id: str | None = None) -> dict[str, str]:
     """Fixed model -> color assignment, stable across figures and across runs.
 
     Sorted alphabetically (not by rank/value) so a model keeps its color even
     if scores change between runs - recoloring on re-sort is exactly the
     anti-pattern this avoids. Past 8 models, extras fold to a shared muted
-    gray rather than generating indistinguishable new hues.
+    gray rather than generating indistinguishable new hues. task_id picks the
+    task's single-hue-family palette (TASK_CATEGORICAL_PALETTES); an unknown
+    or missing task_id falls back to the original multi-hue CATEGORICAL_PALETTE.
     """
+    palette = TASK_CATEGORICAL_PALETTES.get(task_id, CATEGORICAL_PALETTE)
     ordered = sorted(model_names)
     colors: dict[str, str] = {}
     for i, name in enumerate(ordered):
-        colors[name] = CATEGORICAL_PALETTE[i] if i < len(CATEGORICAL_PALETTE) else FOLD_COLOR
+        colors[name] = palette[i] if i < len(palette) else FOLD_COLOR
     return colors
 
 
-def metric_color_map(metric_names: list[str]) -> dict[str, str]:
+def metric_color_map(metric_names: list[str], task_id: str | None = None) -> dict[str, str]:
     """Fixed metric -> color assignment - a SEPARATE namespace from
     model_color_map. Used only in charts where metric (not model) is the
     identity being distinguished by color, so there's no collision with the
     model-color convention used everywhere else.
     """
+    palette = TASK_CATEGORICAL_PALETTES.get(task_id, CATEGORICAL_PALETTE)
     ordered = sorted(metric_names)
     colors: dict[str, str] = {}
     for i, name in enumerate(ordered):
-        colors[name] = CATEGORICAL_PALETTE[i] if i < len(CATEGORICAL_PALETTE) else FOLD_COLOR
+        colors[name] = palette[i] if i < len(palette) else FOLD_COLOR
     return colors
 
 
@@ -96,7 +132,7 @@ def plot_headline_bar_chart(
     if subset.empty:
         raise ValueError(f"No data for {task_id}/{dataset}/{metric_name}")
 
-    colors_by_model = model_color_map(subset["model_name"].tolist())
+    colors_by_model = model_color_map(subset["model_name"].tolist(), task_id=task_id)
     colors = [colors_by_model[m] for m in subset["model_name"]]
 
     fig, ax = plt.subplots(figsize=(max(4, 0.9 * len(subset)), 4))
@@ -152,7 +188,7 @@ def plot_grouped_metric_bar_chart(
         raise ValueError(f"No data for {task_id}/{dataset}/{metric_names}")
 
     models = sorted(subset["model_name"].unique())
-    colors_by_metric = metric_color_map(metric_names)
+    colors_by_metric = metric_color_map(metric_names, task_id=task_id)
     n_metrics = len(metric_names)
     bar_width = 0.8 / n_metrics
     x = range(len(models))
@@ -190,18 +226,19 @@ def plot_grouped_metric_bar_chart(
     return out_path
 
 
-def _ordinal_ramp(n: int) -> list[str]:
-    """n evenly-spaced steps from the sequential blue ramp, light (worst) -> dark (best).
+def _ordinal_ramp(n: int, task_id: str | None = None) -> list[str]:
+    """n evenly-spaced steps from the task's sequential ramp, light (worst) -> dark (best).
 
     Judge labels (Poor/Fair/.../Excellent) are an ordered quality ladder, not
     a symmetric agree<->disagree scale - a single-hue ordinal ramp is the
     honest encoding here, not a diverging pair (which implies a neutral
     midpoint this data doesn't have).
     """
-    if n <= len(SEQUENTIAL_BLUE_STEPS):
-        step = len(SEQUENTIAL_BLUE_STEPS) / n
-        return [SEQUENTIAL_BLUE_STEPS[int(i * step)] for i in range(n)]
-    cmap = _sequential_cmap()
+    steps = TASK_SEQUENTIAL_RAMPS.get(task_id, SEQUENTIAL_BLUE_STEPS)
+    if n <= len(steps):
+        step = len(steps) / n
+        return [steps[int(i * step)] for i in range(n)]
+    cmap = _sequential_cmap(task_id)
     return [cmap(i / max(1, n - 1)) for i in range(n)]
 
 
@@ -224,7 +261,7 @@ def plot_judge_distribution(
 
     labels = subset.sort_values("label_order")["label"].unique().tolist()
     models = sorted(subset["model_name"].unique())
-    ramp = _ordinal_ramp(len(labels))
+    ramp = _ordinal_ramp(len(labels), task_id=task_id)
 
     fig, ax = plt.subplots(figsize=(7, max(2.5, 0.5 * len(models) + 1)))
     fig.patch.set_facecolor(SURFACE)
@@ -281,7 +318,7 @@ def plot_tradeoff_scatter(
     if merged.empty:
         raise ValueError(f"No overlapping data for {task_id}/{dataset}: {x_metric} vs {y_metric}")
 
-    colors_by_model = model_color_map(merged["model_name"].tolist())
+    colors_by_model = model_color_map(merged["model_name"].tolist(), task_id=task_id)
 
     fig, ax = plt.subplots(figsize=(6, 5))
     fig.patch.set_facecolor(SURFACE)
@@ -329,7 +366,7 @@ def plot_group_by_heatmap(
     fig, ax = plt.subplots(figsize=(max(5, 1.1 * len(wide.columns)), max(3, 0.6 * len(wide.index) + 1.5)))
     fig.patch.set_facecolor(SURFACE)
 
-    im = ax.imshow(wide.values, cmap=_sequential_cmap(), vmin=0, vmax=1, aspect="auto")
+    im = ax.imshow(wide.values, cmap=_sequential_cmap(task_id), vmin=0, vmax=1, aspect="auto")
 
     ax.set_xticks(range(len(wide.columns)))
     ax.set_xticklabels(wide.columns, rotation=30, ha="right", color=SECONDARY_INK, fontsize=9)

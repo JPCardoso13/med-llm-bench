@@ -18,7 +18,12 @@ datasets:
 execution:
   num_fewshot: 2
   flush_every: 10
-  max_tokens: 1024
+  # Bumped 1024->3072 (2026-09-08): same reasoning-model truncation risk as
+  # cdkr (see that file's comment and RESEARCH_FINDINGS.md) - not yet
+  # measured directly on oecr, but the mechanism (chain-of-thought eating
+  # the completion budget) isn't MCQ-specific, so raised proactively rather
+  # than waiting to observe it here too.
+  max_tokens: 3072
   fewshot_seed: 42  # same fewshot draws every rerun, for fair comparison
 
 runtime:

@@ -1,0 +1,9 @@
+# qwen3_6_27b_awq_quanttrio: oecr + src generation, run in parallel with
+# the cdkr/medxpertqa resume (175547) since they're independent tasks -
+# no reason to serialize them.
+tasks:
+  - oecr
+  - src
+
+models:
+  - qwen3_6_27b_awq_quanttrio

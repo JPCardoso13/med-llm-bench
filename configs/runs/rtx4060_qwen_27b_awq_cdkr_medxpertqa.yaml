@@ -1,0 +1,9 @@
+# Dataset-level resume for qwen3_6_27b_awq_quanttrio's cdkr/medxpertqa only
+# - medqa (1273/1273) is already complete and saved in raw/cdkr/. See
+# configs/tasks/cdkr_medxpertqa_only.yaml for why this uses a separate
+# task_id rather than reusing "cdkr" directly.
+tasks:
+  - cdkr_medxpertqa_only
+
+models:
+  - qwen3_6_27b_awq_quanttrio
