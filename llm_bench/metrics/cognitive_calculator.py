@@ -630,6 +630,17 @@ def _normalize_final_answer(
             # Long-form answers (e.g. summaries) span multiple lines legitimately;
             # join instead of discarding everything past the first line.
             value = " ".join(line.strip() for line in value.splitlines() if line.strip())
+        elif on_multiline == "last_paragraph":
+            # For un-tagged chain-of-thought (no <think> markers to strip):
+            # models that reason before answering consistently emit numbered
+            # planning steps as separate blank-line-delimited paragraphs, with
+            # the real final answer as the last paragraph (verified against
+            # real qwen3.6 src samples, 2026-09-21 - see RESEARCH_FINDINGS.md).
+            # Still flagged contaminated above since the raw answer was
+            # genuinely multi-paragraph, but the last paragraph is what gets
+            # scored, not the reasoning trail.
+            paragraphs = [p.strip() for p in re.split(r"\n\s*\n", value) if p.strip()]
+            value = paragraphs[-1] if paragraphs else value
         else:
             value = value.splitlines()[0].strip()
 

@@ -1,0 +1,10 @@
+# TP=2 (2-node) re-run of qwen3_6_35b_a3b_awq_quanttrio's oecr - second half
+# of the node-count check started with cdkr (see
+# rtx4060_qwen_35b_awq_cdkr_oecr_2node.yaml). Existing 4-node oecr data
+# stays untouched in outputs/175482/raw/oecr - not deleted/overwritten by
+# this run (new job -> new RUN_ID).
+tasks:
+  - oecr
+
+models:
+  - qwen3_6_35b_a3b_awq_quanttrio

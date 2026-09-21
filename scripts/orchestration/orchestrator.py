@@ -272,7 +272,20 @@ def run_benchmark_for_model(
             else:
                 eval_limit = PER_DATASET_EVAL_LIMIT
 
+            # eval_offset (2026-09-10): resume support for a dataset that
+            # timed out mid-run. data["eval"] is a plain, unshuffled list -
+            # SequentialRunner processes it strictly in order and flushes
+            # every flush_every items, so a partial run's tmp/ file is
+            # always exactly eval_samples[0:N] for whatever N it reached.
+            # Setting eval_offset: N on a resume run's dataset config skips
+            # those already-completed N samples instead of redoing them or
+            # settling for permanent partial coverage. Default 0 is a no-op
+            # for every existing config.
+            eval_offset = int(ds.get("eval_offset", 0) or 0)
+
             eval_samples = data.get("eval", [])
+            if eval_offset:
+                eval_samples = eval_samples[eval_offset:]
             if eval_limit is not None:
                 eval_samples = eval_samples[: int(eval_limit)]
             fewshot_samples = data.get("fewshot", [])

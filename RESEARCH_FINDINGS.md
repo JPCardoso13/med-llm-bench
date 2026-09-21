@@ -18,6 +18,55 @@ out (so the reasoning is auditable later, not just the conclusion).
 
 ---
 
+## Methodology: completion-token budget calibration (2026-09-16)
+
+Written for the thesis methods section — this is the standing rule, not a
+dated correction.
+
+**The budget is set per task, never per model.** `max_tokens` is
+calibrated once for each task, based on (a) that task's expected output
+shape and (b) measured prompt-length headroom against the model family's
+context window (`max_model_len: 16384` for every model in this roster),
+established during a pilot/measurement pass — not by watching any one
+model's behavior and tuning around it. The same resulting budget is then
+applied identically to every model compared on that task. This mirrors
+standard practice in published LLM evaluation harnesses (e.g. HELM), which
+fix a generation-length cap per task category rather than per system.
+
+**Why this doesn't compromise the cross-model comparison**: the threat to
+validity would be giving one model more completion budget than another
+*on the same task*, since that hands the larger-budget model a structural
+advantage independent of its actual capability. That never happens here —
+within a task, budget is a constant across the model roster, not a
+variable. What *is* allowed to vary is the budget between different
+tasks (`cdkr`'s single-letter-plus-reasoning answer needs far less room
+than `oecr`'s worked clinical calculations, and `src`'s bounded-summary
+output combined with much longer inputs constrains how much budget is
+even available) — that's a property of the task, not of any model being
+scored on it.
+
+**Residual truncation under a shared, headroom-verified budget is a
+result, not noise.** Once a budget has been confirmed to leave genuine
+margin under the context window (not simply "the largest value that still
+fits"), a model that still gets cut off more often than another under
+that *same* budget is demonstrating something real about its own
+verbosity/chain-of-thought efficiency on that task. The correct response
+is to report that difference (e.g. as a reliability/efficiency metric
+alongside accuracy), not to individually enlarge that model's budget
+until its truncation rate matches everyone else's — doing so would erase
+exactly the signal being measured.
+
+**Where this project's actual limitation lies**: not in the per-task
+calibration above, but in *when* a task's budget was set relative to when
+each model's data was generated — see "`max_tokens` truncation, measured
+directly across the full roster" below. Some data predates a budget
+recalibration purely because of job scheduling/timing, not by design.
+That's timeline drift, and it is disclosed and corrected (via full
+regeneration) separately from the calibration principle above, which
+holds throughout.
+
+---
+
 ## Pipeline corrections that affect result validity
 
 These aren't findings themselves, but any reader of this log (or the
@@ -87,6 +136,27 @@ thesis) needs them to know which numbers are trustworthy and since when.
   after 3h21m, nothing salvageable). Fixed: a failed judge call is now
   treated like a parse failure (continues to the next sample), and results
   flush to disk after every dataset instead of only once per task.
+
+- **`175482`'s `qwen3_6_35b_a3b_awq_quanttrio` `cdkr`/`oecr` data predates
+  the `max_tokens` 1024→3072 fix (confirmed 2026-09-15)**: that job ran on
+  2026-09-01, before the 2026-09-08 bump documented above, so its `cdkr`
+  accuracy (medqa 58.68%, medxpertqa 14.12%) reflects the ~26.4%/51.1%
+  truncation rates already measured against the old 1024-token budget - it
+  was never regenerated. A same-model, same-datasets TP=2 rerun under the
+  current 3072-token config (job 175575→175577, `outputs/175575/raw/cdkr`)
+  scored medqa 86.10%, medxpertqa 35.02% - confirming the truncation
+  hypothesis's practical impact was even larger than the qualitative
+  "meaningful share" language above suggested. This was originally intended
+  as a pure TP=4-vs-TP=2 determinism sanity check (temperature 0 should give
+  near-identical accuracy regardless of tensor-parallel degree), but the two
+  runs differ in `max_tokens` too, so the large gap is NOT evidence against
+  TP-invariance - it's the already-known truncation effect, now with an
+  end-to-end before/after accuracy delta attached. **Practical implication**:
+  `outputs/175482`'s `cdkr`/`oecr` raw data for this model is stale relative
+  to the current config and should eventually be replaced by a rerun under
+  `max_tokens: 3072` (the TP=2 data, once `oecr` is also done, is a
+  candidate) - the TP-determinism question itself remains untested in
+  isolation (would need a same-`max_tokens` TP=4-vs-TP=2 pair, not yet run).
 
 ---
 
@@ -174,6 +244,309 @@ way.
 `outputs/175453/reports/cdkr/llama3_openbiollm_8b/cognitive_summary.json`
 (`mcq.diagnostics`, `mcq.parsing` — the parse-failure/ambiguous counts).
 
+### `max_tokens` truncation, measured directly across the full roster (2026-09-16, corrected same day, resolved 2026-09-18)
+
+Every prior mention of truncation in this log was either a parse-failure
+proxy or a qualitative spot-check. Measured directly this time, straight
+from each sample's `backend_metrics.finish_reason` (`"length"` = the
+server cut generation off at the token cap, not a natural stop) — no
+estimation involved. **Correction**: the first version of this table
+inferred each row's `max_tokens` from the current task config file rather
+than each sample's own recorded `backend_metrics.max_tokens_configured` —
+this silently mislabeled one row (see the flagged line below and the
+dedicated finding immediately after this table).
+
+| model | task/dataset | `max_tokens` (per-sample, verified) | length-truncation % |
+|---|---|---|---|
+| llama3_8b_instruct | all 6 datasets | 1024/512 | 0.0–0.5% |
+| llama3_openbiollm_8b | cdkr/oecr (4 datasets) | 1024 | 0.1–4.5% |
+| llama3_openbiollm_8b | src/pubmedsum | 512 | **14.2%** |
+| llama3_openbiollm_8b | src/multiclinsum | 512 | 1.3% |
+| qwen3_6_27b_awq_quanttrio | cdkr/medqa (superseded, was 1024) | ~~1024~~ **3072, redone `175613`** | ~~29.8%~~ **2.3%** |
+| qwen3_6_27b_awq_quanttrio | cdkr/medxpertqa | 3072 | 7.4% |
+| qwen3_6_27b_awq_quanttrio | oecr/medcalcbench (superseded, was 3072) | ~~3072~~ **8192, redone `175621` (in progress)** | ~~46.0%~~ pending |
+| qwen3_6_27b_awq_quanttrio | oecr/medcasereasoning (superseded, was 3072) | ~~3072~~ **8192, redone `175621` (in progress)** | ~~60.5%~~ pending |
+| qwen3_6_27b_awq_quanttrio | src/pubmedsum | 3072 | 9.4% |
+| qwen3_6_35b_a3b_awq_quanttrio | cdkr (TP=4, pre-fix, `outputs/175482` — kept as historical record, not deleted) | 1024 | 54.2% / 94.3% |
+| qwen3_6_35b_a3b_awq_quanttrio | oecr (TP=4, pre-fix, `outputs/175482` — kept as historical record, not deleted) | 1024 | 99.8% / 100.0% |
+| qwen3_6_35b_a3b_awq_quanttrio | src (TP=4, pre-fix, `outputs/175482`, superseded) | ~~512~~ **3072, redone `175620`, complete** | ~~100.0% / 100.0%~~ **1.0% / 0.8%** |
+| qwen3_6_35b_a3b_awq_quanttrio | cdkr (TP=2 redo, `outputs/175575`) | 3072 | 1.8% / 4.8% |
+| qwen3_6_35b_a3b_awq_quanttrio | oecr (TP=2 redo, `outputs/175592`, now complete — see resolution below) | ~~3072~~ **8192** | ~~39.9%~~ **0.5% / 1.2%** |
+
+**Three findings here, not two:**
+
+1. **The Llama tier is not uniformly unaffected by the old, smaller budget**,
+   contrary to the blanket assumption written when `max_tokens` was bumped
+   (see the pipeline-correction entry above). The base Instruct model
+   genuinely never approaches either cap. The biomedical fine-tune
+   (OpenBioLLM) does, specifically on `src`/pubmedsum (14.2%) — small
+   enough that a re-run is arguably not worth it, but real enough that it
+   should be disclosed as a limitation rather than asserted away, given
+   this data is going into a thesis.
+2. **The 2026-09-08 fix (1024/512→3072) reduced truncation but did not
+   solve it for either reasoning model.** For `qwen3_6_27b_awq_quanttrio`,
+   truncation on the generative task (`oecr`) is still 46–60% even at
+   3072 tokens — worse than "elevated," closer to "most samples never
+   finish." The 35B model's TP=2 redo fares much better on `cdkr` (1.8–4.8%)
+   but still shows 39.9% on `oecr`/medcalcbench. This means `oecr` metrics
+   for both reasoning models, even under the current config, are computed
+   over a large fraction of cut-off responses — a real limitation to state
+   plainly in any accuracy/quality comparison, not something the 2026-09-08
+   fix already covers.
+3. **`qwen3_6_27b_awq_quanttrio`'s `cdkr` raw file is itself a
+   mixed-vintage merge (found 2026-09-16, while investigating why the
+   dense model appeared far more truncated than the MoE model on medqa
+   specifically).** `medqa` was generated whole in an early run (job
+   175459, 2026-08-31) before the 2026-09-08 `max_tokens` fix, and never
+   redone; `medxpertqa` needed two later `eval_offset` resumes that landed
+   after the fix. The two datasets ended up merged into one "final" file
+   at two different budgets without that being visible unless you check
+   `backend_metrics.max_tokens_configured` per sample rather than the task
+   config file (which only ever shows the *current* value). Practical
+   effect: **there is currently no valid post-fix measurement of this
+   model's `cdkr`/medqa truncation** — the 29.8% above is a real number,
+   but at the old 1024 budget, not comparable to the 35B model's 3072-budget
+   1.8% the way it was originally presented. Where both models are
+   genuinely at 3072 (`medxpertqa`), the gap is real but far smaller: 27B
+   7.4% vs. 35B 4.8%. A `medqa`-only redo at 3072 is queued
+   (`configs/tasks/cdkr_medqa_redo_3072.yaml`) to close this gap. **Lesson
+   for every future audit of this kind**: always check
+   `backend_metrics.max_tokens_configured` (or any other per-sample
+   generation-condition field) directly on the samples being compared —
+   a task config file only tells you what *would* be used today, not what
+   was actually used to produce a given raw file, especially one that was
+   merged from multiple resume jobs spanning a config change.
+
+**Resolution (2026-09-18)**: both fixes confirmed working, directly measured
+post-redo:
+
+- `qwen3_6_35b_a3b_awq_quanttrio`'s `oecr` at 8192 tokens (job 175592,
+  complete): `medcalcbench` 39.9%→**0.5%**, `medcasereasoning`→**1.2%**.
+  Both now comfortably in the "negligible" range.
+- `qwen3_6_27b_awq_quanttrio`'s `cdkr`/medqa at 3072 tokens (job 175613,
+  complete, merged into `outputs/175452/raw/cdkr`): 29.8%→**2.3%**, now
+  consistent with `medxpertqa`'s 7.4% and the 35B model's 1.8-4.8% —
+  confirms finding #3 above was correctly diagnosed as a stale-budget
+  artifact, not a real dense-vs-MoE architectural difference.
+- `qwen3_6_35b_a3b_awq_quanttrio`'s `src` full redo at 3072 (job 175620,
+  complete): `pubmedsum` 100.0%→**1.0%**, `multiclinsum` 100.0%→**0.8%**.
+- Still in progress: `qwen3_6_27b_awq_quanttrio`'s `oecr` redo at 8192
+  (job 175621, ~690/1100 medcalcbench as of 2026-09-20), expected to show
+  a similarly large improvement once complete given the mechanism is now
+  well-established across three separate fixes.
+
+### LLM-judge pass, `qwen3_6_35b_a3b_awq_quanttrio` `oecr` (2026-09-20)
+
+First real judge pass run against corrected (8192-token) data — `gpt-oss-20b`,
+99.6-99.8% parse success on both datasets. Headline rubric scores
+(`diagnosis_correctness` / `reasoning_validity` / `safety_flag`):
+
+- `medcalcbench`: 80.6% Correct, 79.4% reasoning rated Excellent, 2.0%
+  flagged Unsafe.
+- `medcasereasoning`: only 46.7% Correct (51.7% Incorrect), 52.2% reasoning
+  rated Excellent, and **19.0% flagged Unsafe** — nearly 10x
+  `medcalcbench`'s rate.
+
+The `medcasereasoning`/Unsafe gap is worth a closer look before writing this
+up: `medcasereasoning` is open-ended diagnostic reasoning over real clinical
+cases (harder, more room for a genuinely unsafe recommendation) vs.
+`medcalcbench`'s more constrained numeric calculations, so some gap is
+plausible on task-difficulty grounds alone — but a 10x jump hasn't been
+spot-checked against actual transcripts yet, so treat as a real, measured
+number and an open question on root cause, not yet a settled explanation.
+
+### LLM-judge pass, `qwen3_6_35b_a3b_awq_quanttrio` `src` (2026-09-20)
+
+97.3-98.1% parse success on both datasets. Headline rubric scores
+(`coverage` / `faithfulness`, both summarization-appropriate rubrics —
+no `safety_flag` on this task):
+
+- `pubmedsum`: 84.0% coverage rated Excellent, 91.0% faithfulness rated
+  Excellent.
+- `multiclinsum`: 74.5% coverage rated Excellent, 88.9% faithfulness rated
+  Excellent.
+
+No red flags here — both datasets look healthy, in contrast to `oecr`'s
+`medcasereasoning` safety-flag anomaly above.
+
+**Not yet done**: raising `max_tokens` again (e.g. to 4096+) and
+re-measuring, to see whether `oecr`'s truncation rate for reasoning models
+keeps falling or has hit some other bottleneck (e.g. the model's own
+`max_model_len` ceiling, or genuinely verbose chain-of-thought regardless
+of budget). Given each bump requires a full re-generation, this is a
+deliberate cost/benefit call for whoever owns the timeline, not something
+to silently redo.
+
+---
+
+## Integrity audit (2026-09-21)
+
+A full, strict pass over every model's current raw data, reports, and charts,
+requested explicitly before any results get evaluated for the thesis.
+Checked per model/task/dataset: entry counts vs. expected size, duplicate
+`sample_id`s, `finish_reason`/`max_tokens_configured` consistency, parse
+rates, chart freshness, and plausibility of headline numbers. Full method:
+counted directly from raw JSON + `backend_metrics`, cross-referenced against
+`reports/*/cognitive_summary.json`, and (for the two findings below) verified
+against the actual scoring source code, not just its config.
+
+**Structural integrity: clean.** Every dataset across all four models shows
+full expected coverage (1273/2450/1100/897, and pubmedsum/multiclinsum within
+the explained range below), zero duplicate `sample_id`s anywhere, zero empty
+responses, and `backend_metrics.perplexity` present and meaningfully varied
+per sample (hundreds of distinct values per dataset) — real, distinct API
+responses throughout, not placeholder or duplicated data. `max_tokens_configured`
+is now single-valued per dataset everywhere current (the `cdkr`/medqa
+mixed-vintage bug from 2026-09-16 is confirmed fully resolved and does not
+recur elsewhere).
+
+**Investigated and resolved as genuine coincidence, not a bug**: `llama3_8b_instruct`
+and the *old, pre-fix* `qwen3_6_35b_a3b_awq_quanttrio` (`outputs/175482`) both
+show `cdkr`/medqa accuracy of exactly 747/1273 (58.6803%, matching to full
+float precision). Verified by reading the actual extraction implementation
+(`llm_bench/metrics/answer_extraction.py::extract_mcq_answer_letter` — collects
+every distinct `[A-J]` letter matched by any of the 4 configured patterns
+across the whole response; >1 distinct letter anywhere = "ambiguous" = counted
+wrong) and faithfully reproducing it standalone: it independently reproduces
+all four models' cached accuracies exactly (747/1273, 747/1273, 1096/1273,
+1071/1273), confirming both the code and the cached numbers are correct. The
+match is a real coincidence between two unrelated mechanisms — Llama's plain
+performance ceiling on non-reasoning MCQ vs. the pre-fix 35B run's answers
+being destroyed by 1024-token truncation — worth noting since a coincidence
+at 16 significant digits reads as suspicious at a glance, but not something to
+act on: that 35B run is already stale/superseded data.
+
+**Real finding — `src` (summarization) BERTScore/token_f1 may be scored on
+contaminated text for both Qwen models, not a clean summary.** `answer_clean_rate`
+is exactly 0.0 for both `qwen3_6_27b_awq_quanttrio` and
+`qwen3_6_35b_a3b_awq_quanttrio` on every `src` dataset (`pubmedsum`,
+`multiclinsum`), vs. ~90-100% for `llama3_8b_instruct`. Traced to the actual
+scoring code (`llm_bench/metrics/cognitive_calculator.py`): `oecr`'s
+contamination handling *truncates* the offending text before scoring
+(`on_multiline: truncate_first_line`), but `src`'s config uses `on_multiline: join`,
+which only despaces newlines — it does **not** strip anything, despite the
+config's own comment implying multi-line content there is "legitimate" and
+not contamination. Root cause confirmed directly in raw output: these Qwen3.6
+AWQ builds emit un-tagged chain-of-thought prose (not wrapped in `<think>`
+tags, which is the only thing `clean_response_text()` strips), so their real
+answer is preceded by an unstripped reasoning preamble that then (a) trips
+the unconditional "contains a newline → contaminated" flag and (b) survives
+into the text actually scored against the reference summary for
+BERTScore/token_f1. **Practical implication**: the `src` BERTScore/token_f1
+numbers reported for both Qwen models (F1 ≈ 0.81-0.83) are likely computed
+partly against leaked reasoning text, not a clean final summary, and are not
+directly comparable to Llama's equivalent numbers on the same basis. The
+LLM-judge `coverage`/`faithfulness` scores are a separate, judge-based
+mechanism and are not known to share this problem — they remain the more
+trustworthy `src` quality metric for the Qwen tier until this is fixed
+(e.g., a CoT-stripping heuristic for un-tagged reasoning preambles, or
+truncating on the first contamination marker for `src` too).
+
+**Fixed and verified (2026-09-21).** Added a new `on_multiline: last_paragraph`
+mode (`llm_bench/metrics/cognitive_calculator.py::_normalize_final_answer`):
+splits the captured answer on blank lines and scores only the last paragraph,
+still flagging `contaminated=True` (the compliance-failure signal is kept,
+not deleted — matching `oecr`'s existing design). Only
+`configs/metrics/cognitive.generative.summarization.yaml` (used exclusively
+by `src`) opts into it; `join`/`truncate_first_line` behavior is unchanged
+for every other config. Validated the heuristic against two real raw samples
+(one 35B `multiclinsum`, one 27B `pubmedsum`) before applying it — in both
+cases it cleanly isolated the model's actual final paragraph from the
+numbered planning steps above it.
+
+Recomputed `src` for all 4 models (no regeneration needed — pure
+metrics-recompute against existing raw output) and confirmed:
+- **Llama tier: unchanged**, as expected (single-paragraph outputs have only
+  one "paragraph" either way). `llama3_8b_instruct` pubmedsum token_f1
+  0.4351→0.4285, bertscore_f1 0.8458→0.8457 (noise-level, from the ~9% of
+  samples already flagged contaminated pre-fix); `llama3_openbiollm_8b`
+  multiclinsum token_f1 unchanged to 15 decimal places (0.386169821803997).
+- **Both Qwen models: large, consistent improvement.**
+  `qwen3_6_27b_awq_quanttrio`: pubmedsum token_f1 0.1485→**0.3784** (+155%),
+  bertscore_f1 0.8179→0.8394; multiclinsum token_f1 0.0922→**0.3411** (+270%),
+  bertscore_f1 0.8206→0.8582. `qwen3_6_35b_a3b_awq_quanttrio`: pubmedsum
+  token_f1 0.1683→**0.3819**, bertscore_f1 0.8144→0.8404; multiclinsum
+  token_f1 0.1074→**0.3655**, bertscore_f1 0.8189→0.8629. Both now much
+  closer to (though still somewhat below) Llama's range, consistent with
+  scoring the model's real answer instead of a reasoning-diluted blob.
+  `answer_contaminated_count` stays at 985/1000 and 1000/1000 as intended —
+  the compliance-failure signal is preserved, just no longer corrupting the
+  quality score.
+
+Isolation verified directly, not assumed: `cdkr`'s `cognitive_summary.json`
+is byte-for-byte identical (md5 match) before/after for both Qwen models;
+`oecr`'s report files carry mtimes from days before this fix, confirming
+they were never touched. Charts regenerated for all 3 affected RUN_IDs
+(175453, 175452_oecr_src, 175620); the concurrently-running generation job
+(175645) was undisturbed throughout (separate nodes, no shared job slot
+contention). Diff size: 2 files, 19 insertions, 1 deletion.
+
+**Real finding, model behavior not a bug — `llama3_openbiollm_8b`'s `oecr`
+format-parse rate is far lower than `llama3_8b_instruct`'s on the same task**:
+12.5% (medcalcbench) and 3.2% (medcasereasoning) vs. 91.5%/99.3%. Spot-checked
+raw responses directly: OpenBioLLM does give real, on-topic answers (e.g.
+correct use of the Cockcroft-Gault equation), but states its final numeric
+answer embedded in longer prose ("...the final answer is 54.497728 mL/min.")
+rather than a clean, template-following final line the way Instruct does —
+so the format-based extractor misses it far more often. Its LLM-judge parse
+rate is unaffected (85-90%, matching Instruct's range), so judge-based scores
+for OpenBioLLM's `oecr` remain reliable even though the format-based
+`token_f1`/BERTScore "answer" metrics are computed over a much smaller,
+successfully-parsed subset for this model — a comparability caveat, not a
+pipeline defect.
+
+**Explained, not a bug — pubmedsum/multiclinsum sample counts differ
+per model** (923 for both Llama models, 985-991 for Qwen models). Confirmed
+via the sequential runner (`llm_bench/runner/sequential_runner.py`): a
+sample whose rendered prompt + task `max_tokens` exceeds the model's own
+`max_model_len` is dropped (logged as a generation-failure warning, not
+retried or backfilled). Llama's `max_model_len: 8192` overflows on ~77/1000
+long documents; Qwen's `max_model_len: 16384` overflows on only 9-15/1000.
+The underlying 1000-document sample *list* is identical for every model —
+this is a legitimate consequence of differing context windows and tokenizers,
+not a dataset-construction bug. Caveat worth keeping in mind for the thesis:
+cross-model `src` comparisons are technically over slightly different
+(~92-99% overlapping) sample sets, and there is no persisted per-run
+manifest of which exact sample IDs were dropped for a given model/run — if
+exact overlap ever matters, it would need to be reconstructed from
+orchestration logs rather than read off a file.
+
+**Real finding — few-shot draws are not aligned across models on
+`eval_offset`-resumed slices (found 2026-09-21).** Each request is a
+stateless chat (`[system, user]`; the task-level system prompt is re-sent
+every time), and the few-shot examples inside the user turn are re-drawn per
+sample via `random.Random(fewshot_seed).sample(...)` — one RNG per dataset,
+created at runner construction and consumed once per sample. An
+`eval_offset` resume constructs a fresh runner, so the RNG restarts from the
+seed at the first *resumed* sample instead of advancing past the skipped
+prefix: the resumed slice gets the draws that samples 0..k would have got.
+Measured directly against the uninterrupted Llama run (same seed, same
+sample order): `qwen3_6_27b_awq_quanttrio` `cdkr`/medxpertqa 515/2450
+(21.0%, idx 1930+) and `qwen3_6_35b_a3b_awq_quanttrio` `cdkr`/medqa 273/1273
+(21.4%, idx 1000+) received different few-shot examples than the same
+samples did for the other models; every other current `cdkr` dataset is
+fully aligned (0 mismatches). `src` is unaffected (`num_fewshot: 0`); `oecr`
+will be affected only for 27B `medcalcbench` idx 980+ once job 175645 merges
+(`num_fewshot: 2`). The `fewshot_seed` "same draws every rerun" guarantee in
+the task configs therefore holds for uninterrupted runs only. Effect size on
+accuracy is not quantified (few-shot choice adds some variance); correct
+disclosure for the thesis is that ~21% of two datasets used a different (but
+seeded, reproducible) few-shot draw. Possible remedy, not applied: advance the
+RNG by `eval_offset` draws on resume (small code change) and regenerate the
+two affected slices.
+
+**Housekeeping found and fixed during this audit**: `outputs/175452` (the
+27B model's `cdkr` home) had accumulated stale clutter from earlier in the
+session — a leftover 5-sample toy-validation `oecr`/`src` (from the very
+first, pre-real-run probe of this RUN_ID) and merged-away resume
+intermediates (`cdkr_medxpertqa_only`, `cdkr_medxpertqa_resume2`,
+`cdkr_medqa_redo_3072`) — all deleted; `outputs/175452` now contains only
+its real `cdkr` data as intended.
+
+**Known, already-tracked, not new**: `qwen3_6_27b_awq_quanttrio`'s `oecr`
+(`outputs/175452_oecr_src`) still holds the pre-8192-fix data (46.0%/60.5%
+truncated) pending job 175645's completion — expected, already in progress.
+
 ---
 
 ## Open questions / needs more evidence
@@ -196,15 +569,9 @@ way.
   produced any data — both attempts hung indefinitely during model loading.
   No findings possible here yet; status is "unresolved infrastructure
   issue," not a research result.
-- **Reasoning models may need a much larger `max_tokens` budget for MCQ
-  tasks than non-reasoning ones.** On `qwen3_6_35b_a3b_awq_quanttrio`'s
-  `cdkr` (generation `max_tokens: 1024`), a meaningful share of "missing"
-  (unparseable) responses are genuine truncations — the model's chain-of-
-  thought runs out of budget before ever stating a final letter, not an
-  extraction failure (spot-checked: these responses end mid-reasoning,
-  never reach "Final Answer" or similar). Not yet quantified precisely
-  (need: fraction of parse-failures that are truncation vs. genuinely
-  no-answer-given), and not yet acted on — raising `max_tokens` would
-  require re-running generation, a deliberate cost/benefit call, not a
-  silent fix. Worth deciding before writing up `cdkr` coverage numbers for
-  any reasoning model.
+- ~~Reasoning models may need a much larger `max_tokens` budget for MCQ
+  tasks than non-reasoning ones.~~ **Resolved and quantified 2026-09-16** —
+  see "`max_tokens` truncation, measured directly across the full roster"
+  under Verified findings below. Raising the budget (1024/512→3072,
+  2026-09-08) was the acted-on fix, but direct measurement now shows it
+  did not fully close the gap for the two reasoning models.

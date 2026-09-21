@@ -1,0 +1,10 @@
+# qwen3_6_27b_awq_quanttrio: src only. Split off from
+# rtx4060_qwen_27b_awq_oecr_src.yaml (2026-09-11) - oecr is being handled
+# separately by the medcasereasoning eval_offset resume (job 175563), so
+# a run listing both tasks here would wastefully redo oecr's already-safe
+# medcalcbench + in-progress medcasereasoning.
+tasks:
+  - src
+
+models:
+  - qwen3_6_27b_awq_quanttrio

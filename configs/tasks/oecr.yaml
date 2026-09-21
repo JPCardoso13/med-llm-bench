@@ -18,12 +18,17 @@ datasets:
 execution:
   num_fewshot: 2
   flush_every: 10
-  # Bumped 1024->3072 (2026-09-08): same reasoning-model truncation risk as
-  # cdkr (see that file's comment and RESEARCH_FINDINGS.md) - not yet
-  # measured directly on oecr, but the mechanism (chain-of-thought eating
-  # the completion budget) isn't MCQ-specific, so raised proactively rather
-  # than waiting to observe it here too.
-  max_tokens: 3072
+  # Bumped 3072->8192 (2026-09-16): direct measurement (RESEARCH_FINDINGS.md,
+  # "max_tokens truncation, measured directly across the full roster") found
+  # 3072 was still truncating 46-60% of qwen3_6_27b_awq_quanttrio's oecr
+  # samples and 39.9% of qwen3_6_35b_a3b_awq_quanttrio's - far worse than
+  # cdkr's 7-30% at the same budget. Confirmed real headroom before raising:
+  # oecr's own prompts max out at 6609 tokens (medcalcbench) against this
+  # model family's 16384-token context window, so 8192 leaves >1500 tokens
+  # of margin even in the worst observed case - this was never a context-
+  # window constraint, just too conservative a budget for how verbose these
+  # reasoning models are on generative (non-MCQ) output.
+  max_tokens: 8192
   fewshot_seed: 42  # same fewshot draws every rerun, for fair comparison
 
 runtime:

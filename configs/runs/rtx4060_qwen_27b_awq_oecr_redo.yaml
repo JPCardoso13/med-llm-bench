@@ -1,0 +1,12 @@
+# Full redo of qwen3_6_27b_awq_quanttrio's oecr at max_tokens: 8192 (see
+# configs/tasks/oecr.yaml's 2026-09-16 comment). The existing oecr data in
+# outputs/175452_oecr_src/raw/oecr was generated at max_tokens: 3072 and
+# measured at 46-60% length-truncation - not usable for the final report.
+# Not a resume - a full regeneration, since a mixed-budget dataset would
+# break the cross-model consistency this bump was meant to restore. New
+# isolated RUN_ID; old oecr data stays where it is until this is verified.
+tasks:
+  - oecr
+
+models:
+  - qwen3_6_27b_awq_quanttrio

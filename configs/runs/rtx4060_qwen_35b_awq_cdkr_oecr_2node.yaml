@@ -1,0 +1,20 @@
+# TP=2 (2-node) re-run of qwen3_6_35b_a3b_awq_quanttrio's cdkr for the
+# node-count sanity check requested 2026-09-12: this model's cdkr/oecr
+# originally ran at TP=4 (job 175482, 4 nodes) while its own src and all of
+# qwen3_6_27b_awq_quanttrio's tasks ran at TP=2. Since generation is
+# temperature=0 (deterministic), a TP=2 rerun should reproduce essentially
+# the same accuracy as the existing 4-node data in outputs/175482/raw/cdkr -
+# that data is NOT touched/deleted by this run (new job -> new RUN_ID,
+# lands under outputs/<new_id>/ instead).
+#
+# cdkr only (not oecr too) to start: the 27B dense AWQ sibling needed two
+# separate resume passes to finish cdkr alone at TP=2 in 48h, and this
+# model's MoE "a3b" architecture (35B total / ~3B active) makes its TP=2
+# pace hard to predict from that data point - splitting proactively rather
+# than gambling the full cdkr+oecr scope (5720 items) fits one 48h window.
+# oecr follows in a separate job once this completes or a slot frees up.
+tasks:
+  - cdkr
+
+models:
+  - qwen3_6_35b_a3b_awq_quanttrio

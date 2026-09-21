@@ -16,7 +16,14 @@ extraction:
   answer:
     pattern: (?is)^(.*)$
     trim: true
-    on_multiline: join  # multi-line is legitimate content here, unlike a short QA answer
+    # last_paragraph (2026-09-21): un-tagged reasoning models (Qwen3.6 AWQ
+    # builds) emit numbered planning steps as separate paragraphs ahead of
+    # the real summary, with no <think> tag for clean_response_text() to
+    # strip. "join" scored that whole blob (0% answer_clean_rate on both
+    # Qwen models, every src dataset) - last_paragraph takes just the final
+    # paragraph, verified against real samples to reliably match the
+    # model's actual final answer. See RESEARCH_FINDINGS.md.
+    on_multiline: last_paragraph
 
 reporting:
   enabled: true

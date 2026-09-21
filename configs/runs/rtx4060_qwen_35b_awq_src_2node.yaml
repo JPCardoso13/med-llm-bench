@@ -1,0 +1,12 @@
+# Full redo of qwen3_6_35b_a3b_awq_quanttrio's src at TP=2. The existing
+# data in outputs/175482/raw/src was generated 2026-09-03/07, before the
+# 2026-09-08 max_tokens fix (512->3072) - confirmed 2026-09-16 that 100% of
+# samples in both pubmedsum and multiclinsum hit finish_reason="length"
+# (fully truncated, not usable). Not a resume - a full regeneration under
+# the current 3072-token budget. New isolated RUN_ID; old data in
+# outputs/175482 stays put until this is verified done.
+tasks:
+  - src
+
+models:
+  - qwen3_6_35b_a3b_awq_quanttrio

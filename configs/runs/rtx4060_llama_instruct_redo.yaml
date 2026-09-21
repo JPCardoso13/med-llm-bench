@@ -1,0 +1,14 @@
+# Full redo of llama3_8b_instruct across all 3 tasks, at the current
+# per-task budgets (cdkr/src: 3072, oecr: 8192) instead of the 1024/1024/512
+# it originally ran under (job 175453, 2026-08-20). Split out of
+# rtx4060_boot_check.yaml (which lists both Llama models together) so this
+# model can run in its own job slot in parallel with
+# rtx4060_llama_openbiollm_redo.yaml, instead of sharing one job
+# sequentially like the original run did.
+tasks:
+  - cdkr
+  - oecr
+  - src
+
+models:
+  - llama3_8b_instruct
