@@ -330,10 +330,14 @@ post-redo:
   artifact, not a real dense-vs-MoE architectural difference.
 - `qwen3_6_35b_a3b_awq_quanttrio`'s `src` full redo at 3072 (job 175620,
   complete): `pubmedsum` 100.0%→**1.0%**, `multiclinsum` 100.0%→**0.8%**.
-- Still in progress: `qwen3_6_27b_awq_quanttrio`'s `oecr` redo at 8192
-  (job 175621, ~690/1100 medcalcbench as of 2026-09-20), expected to show
-  a similarly large improvement once complete given the mechanism is now
-  well-established across three separate fixes.
+- `qwen3_6_27b_awq_quanttrio`'s `oecr` redo at 8192 (jobs 175621→175645→175676,
+  three resume passes total, complete 2026-09-23): `medcalcbench`
+  46.0%→**2.8%**, `medcasereasoning` 60.5%→**11.9%**. Both dramatically
+  better, but `medcasereasoning`'s 11.9% is the highest residual truncation
+  of any fixed dataset so far (35B's equivalent redo: 1.2%). Not yet
+  explained — worth a closer look before treating 8192 as "enough" for this
+  specific model/dataset pair; flagged as an open question below rather
+  than assumed fine by analogy with the other fixes.
 
 ### LLM-judge pass, `qwen3_6_35b_a3b_awq_quanttrio` `oecr` (2026-09-20)
 
@@ -547,10 +551,55 @@ its real `cdkr` data as intended.
 (`outputs/175452_oecr_src`) still holds the pre-8192-fix data (46.0%/60.5%
 truncated) pending job 175645's completion — expected, already in progress.
 
+**Degenerate-response check (2026-09-22).** Prompted by a direct question
+("are we sure every finished response is real and scoreable, not 5 words or
+rambling without answering") — checked response-length distributions and
+manually read the shortest response in every current model/task/dataset.
+
+- Zero completely empty responses anywhere, across all four models, every
+  dataset. Qwen tier: no degenerate responses found at all in spot-checks —
+  every response is thousands of characters of real reasoning plus a real
+  answer.
+- `llama3_8b_instruct` `oecr`: 9 genuinely empty responses (7/1100
+  `medcalcbench`, 2/897 `medcasereasoning`) — the model emits a bare
+  `"Final answer:\n\nExplanation:"` template with nothing filled in, then
+  stops natively (`finish_reason: stop`, not truncation). Checked whether
+  this corrupts scoring: it does not — `oecr`'s extraction regex requires
+  actual text between "final answer:" and "explanation:", so an empty
+  capture correctly returns `None` and is counted as a parse failure, not
+  scored as a real answer. Consistent with `medcalcbench`'s already-known
+  91.5% parse-success rate. No action needed.
+- **`llama3_openbiollm_8b` `src`/pubmedsum: 19/923 (2.1%) responses are the
+  model echoing the task instruction back instead of summarizing** (e.g.
+  `"You have read the document. Now summarize it in your own words."`,
+  `"You: user"`). Unlike the Llama-Instruct case above, these ARE currently
+  scored as valid: `src`'s extraction pattern is `^(.*)$` (captures the
+  whole response, no content validation), so `parse_success_rate` reads
+  1.0 for this dataset despite these 19 non-answers. Checked every other
+  model/dataset combination for the same echo pattern — confirmed isolated
+  to this one model/dataset pair, not systemic. **Not yet fixed** — awaiting
+  the user's call on whether to add a small, isolated exclusion (same style
+  as the `on_multiline: last_paragraph` fix: detect the echo pattern,
+  exclude those 19 samples from being scored as valid, recompute from
+  existing raw output, no rerun needed) versus documenting this 2%-of-one-
+  dataset gap as a stated limitation instead.
+
 ---
 
 ## Open questions / needs more evidence
 
+- **Why does `qwen3_6_27b_awq_quanttrio`'s `oecr`/medcasereasoning still
+  truncate at 11.9% under the 8192 budget, when every other fixed dataset
+  (35B's `oecr`/medcasereasoning: 1.2%; 27B's own `oecr`/medcalcbench: 2.8%)
+  landed in the low single digits?** Same task, same budget, same prompt —
+  only the model differs from the 35B comparison point. Candidate
+  explanations, none checked yet: this model may reason more verbosely
+  specifically on `medcasereasoning`'s longer, more open-ended clinical
+  cases than on `medcalcbench`'s more constrained calculations; or 8192
+  genuinely isn't enough headroom for this model on this dataset even
+  though it was for the MoE model. Worth a quick check (prompt-length /
+  completion-length distribution on the still-truncated 107 samples) before
+  citing 8192 as a settled fix for this specific pair.
 - **Root cause of the "flutterassistant"-class token corruption.** Leading
   hypothesis: a tokenizer/vocabulary misalignment between the serving setup
   and the fine-tuned checkpoint (candidate cause: the borrowed chat

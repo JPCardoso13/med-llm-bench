@@ -24,3 +24,6 @@ outputs/
 # actually baking it in - e.g. bert-score, added for BERTScore support.
 # Delete once the corresponding rebuild lands; not meant to be permanent.
 /.container_overlay
+
+HANDOFF.md
+RESEARCH_FINDINGS.md

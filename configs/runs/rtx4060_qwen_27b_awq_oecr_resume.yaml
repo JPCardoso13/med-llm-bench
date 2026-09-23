@@ -1,7 +1,0 @@
-# Resume of job 175621's oecr redo (medcalcbench remainder + medcasereasoning
-# fresh). See configs/tasks/oecr_resume_175621.yaml.
-tasks:
-  - oecr_resume_175621
-
-models:
-  - qwen3_6_27b_awq_quanttrio
